@@ -1,0 +1,209 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Accent color variables (swapped at runtime by admin) ───────────────── */
+:root {
+  --accent:       61 181 73;    /* #3db549 — green default */
+  --accent-hover: 93 214 105;   /* #5dd669 — green light   */
+  --accent-fg:   255 255 255;   /* white text on accent    */
+}
+
+/* ── Neutral surface system — "Engineered Trust" palette ─────────────────── */
+:root {
+  --canvas:  244 246 249;   /* #F4F6F9 cool gray app background   */
+  --surface: 255 255 255;   /* #FFFFFF cards, panels              */
+  --sunken:  248 250 252;   /* #F8FAFC table headers, wells       */
+  --line:    216 223 231;   /* #D8DFE7 borders, dividers          */
+  --ink:      27  43  58;   /* #1B2B3A headings, primary text     */
+  --body:     68  87 107;   /* #44576B secondary text, labels     */
+  --faint:   122 139 160;   /* #7A8BA0 tertiary text, placeholders*/
+}
+
+.dark {
+  --canvas:   17  25  39;   /* #111927 */
+  --surface:  26  36  52;   /* #1A2434 */
+  --sunken:   21  30  46;   /* #151E2E */
+  --line:     42  54  72;   /* #2A3648 */
+  --ink:     228 234 241;   /* #E4EAF1 */
+  --body:    148 166 187;   /* #94A6BB */
+  --faint:   100 116 139;   /* #64748B */
+}
+
+/* ── Base resets ─────────────────────────────────────────────────────────── */
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-canvas text-ink text-[13px] leading-5;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-display;
+  }
+
+  /* Smooth theme transitions — only on color-related props */
+  *,
+  *::before,
+  *::after {
+    transition-property: background-color, border-color, color, fill, stroke, box-shadow;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+
+  /* Thin scrollbars */
+  ::-webkit-scrollbar       { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-line rounded-full; }
+}
+
+/* ── Component shorthands ────────────────────────────────────────────────── */
+@layer components {
+  /* Card — hairline border, minimal shadow: engineered, not floating */
+  .card {
+    @apply bg-surface rounded-xl border border-line shadow-card;
+  }
+
+  /* Glass panel — floating overlays (toolbars, legends) above canvases */
+  .glass {
+    @apply bg-surface/80 backdrop-blur-md border border-line/70 shadow-card rounded-xl;
+  }
+
+  /* Overline label — section/card/stat labels. The system's typographic signature.
+     (named .overline-label because `overline` is a Tailwind text-decoration utility) */
+  .overline-label {
+    @apply text-overline font-medium uppercase text-body;
+  }
+
+  /* Status spine — 3px left border encoding state on rows/cards/alerts */
+  .spine         { @apply border-l-[3px]; }
+  .spine-agent   { @apply border-l-[3px] border-l-emerald-600 dark:border-l-emerald-500; }
+  .spine-active  { @apply border-l-[3px] border-l-blue-600 dark:border-l-blue-400; }
+  .spine-warn    { @apply border-l-[3px] border-l-amber-600 dark:border-l-amber-500; }
+  .spine-critical{ @apply border-l-[3px] border-l-red-600 dark:border-l-red-500; }
+  .spine-neutral { @apply border-l-[3px] border-l-line; }
+
+  /* Input base */
+  .input-base {
+    @apply w-full rounded-md border border-line
+           bg-surface text-ink
+           placeholder:text-faint
+           focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent
+           text-sm px-3 py-2;
+  }
+
+  /* Primary button — one per view */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2
+           h-9 rounded-md px-4 text-sm font-medium
+           bg-accent text-accent-fg
+           hover:bg-accent-hover
+           disabled:opacity-50 disabled:cursor-not-allowed
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+           dark:focus-visible:ring-offset-surface
+           transition-colors;
+  }
+
+  /* Secondary button — the workhorse */
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2
+           h-9 rounded-md px-4 text-sm font-medium
+           border border-line bg-surface text-ink
+           hover:bg-canvas
+           disabled:opacity-50 disabled:cursor-not-allowed
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
+           transition-colors;
+  }
+
+  /* Ghost button */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2
+           rounded-md px-3 py-2 text-sm font-medium
+           text-body
+           hover:bg-sunken hover:text-ink
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-line
+           transition-colors;
+  }
+
+  /* Destructive button — rollback / kill switch / reject only */
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2
+           h-9 rounded-md px-4 text-sm font-medium
+           bg-red-700 text-white
+           hover:bg-red-800
+           disabled:opacity-50 disabled:cursor-not-allowed
+           focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2
+           dark:focus-visible:ring-offset-surface
+           transition-colors;
+  }
+
+  /* Nav item */
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium
+           text-body
+           hover:bg-sunken hover:text-ink
+           transition-colors cursor-pointer;
+  }
+
+  .nav-item-active {
+    @apply bg-accent-subtle text-accent dark:text-accent;
+  }
+
+  /* Table shell — 40px rows, sunken sticky header */
+  .table-head {
+    @apply text-overline font-medium uppercase text-body text-left px-4 py-2 bg-sunken sticky top-0 z-[1];
+  }
+
+  .table-cell {
+    @apply px-4 py-2.5 text-sm text-ink border-t border-line;
+  }
+
+  /* Skeleton loader — matches content geometry, never a spinner */
+  .skeleton {
+    @apply bg-sunken animate-pulse rounded;
+  }
+
+  /* Live-row pulse: single 800ms tint fade when a WebSocket row arrives */
+  .row-arrived {
+    animation: row-arrived 800ms ease-out 1;
+  }
+}
+
+@keyframes row-arrived {
+  from { background-color: rgb(var(--accent) / 0.10); }
+  to   { background-color: transparent; }
+}
+
+/* ── Ticket Tree canvas (React Flow) ─────────────────────────────────────── */
+.ticket-tree-canvas .react-flow {
+  background: rgb(var(--canvas));
+}
+/* Smooth relayout when branches expand/collapse */
+.ticket-tree-canvas .react-flow__node {
+  transition: transform 260ms ease-out;
+}
+.ticket-tree-canvas .react-flow__edge-path {
+  transition: stroke-width 200ms ease-out, stroke 200ms ease-out;
+}
+/* Flowing dash on edges into branches that need attention */
+.ticket-tree-canvas .react-flow__edge.animated .react-flow__edge-path {
+  stroke-dasharray: 7 4;
+  animation: tree-edge-flow 900ms linear infinite;
+}
+@keyframes tree-edge-flow {
+  to { stroke-dashoffset: -11; }
+}
+.ticket-tree-canvas .react-flow__controls-button {
+  background: rgb(var(--surface));
+  border-bottom: 1px solid rgb(var(--line));
+  fill: rgb(var(--body));
+  color: rgb(var(--body));
+}
+.ticket-tree-canvas .react-flow__controls-button:hover {
+  background: rgb(var(--sunken));
+}
+.ticket-tree-canvas .react-flow__minimap svg {
+  background: rgb(var(--sunken));
+}

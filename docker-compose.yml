@@ -1,0 +1,13 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: aura-qdrant
+    ports:
+      - "6333:6333"   # REST API  (used by the app)
+      - "6334:6334"   # gRPC      (optional; kept for tooling)
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+volumes:
+  qdrant_storage:

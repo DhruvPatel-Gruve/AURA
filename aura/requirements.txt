@@ -1,0 +1,53 @@
+# ── Web Framework ─────────────────────────────────────────────────────────────
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+slowapi>=0.1.9
+
+# ── Config & Validation ────────────────────────────────────────────────────────
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+
+# ── Auth (stubs for Phase 0; fully wired in Phase 1) ──────────────────────────
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# ── Async HTTP (JSM REST API client) ──────────────────────────────────────────
+httpx>=0.27.0
+
+# ── Database ───────────────────────────────────────────────────────────────────
+sqlalchemy[asyncio]>=2.0.31
+aiosqlite>=0.20.0
+
+# ── Vector DB ──────────────────────────────────────────────────────────────────
+qdrant-client>=1.10.0
+
+# ── Embeddings — text-embedding-004 ───────────────────────────────────────────
+google-generativeai>=0.7.0
+
+# ── RAG: Sparse BM25 vectors (hybrid search) ──────────────────────────────────
+rank-bm25>=0.2.2
+
+# ── Agent Orchestration (stubs for Phase 0; used in Phase 1) ──────────────────
+langgraph>=0.2.0
+langchain-core>=0.2.0
+
+# ── LLM — Qwen3 8B via OpenAI-compatible endpoint (Phase 1) ───────────────────
+openai>=1.40.0
+
+# ── Scheduler ──────────────────────────────────────────────────────────────────
+apscheduler>=3.10.4
+
+# ── Logging ────────────────────────────────────────────────────────────────────
+structlog>=24.2.0
+
+# ── Utilities ──────────────────────────────────────────────────────────────────
+python-dotenv>=1.0.1
+tiktoken>=0.7.0
+tenacity>=8.4.0
+markitdown[docx,pdf,pptx,xlsx]>=0.1.0   # document → Markdown conversion (PDF, DOCX, XLSX, PPTX, HTML, …)
+python-multipart>=0.0.9       # required by FastAPI for file uploads
+
+# ── Testing ────────────────────────────────────────────────────────────────────
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+respx>=0.21.0

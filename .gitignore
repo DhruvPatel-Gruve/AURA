@@ -1,0 +1,51 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+.venv/
+venv/
+
+# ── Node / frontend ───────────────────────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+*.local
+
+# ── Env files — never commit real credentials ─────────────────────────────────
+# .env.example (and any *.env.example variant) is a placeholder, fine to
+# track; anything else named .env* is a real per-instance secrets file —
+# including renamed/backup copies like .env.zendesk.retired-backup.
+.env
+.env.*
+!.env.example
+!*.env.example
+
+# ── SQLite databases + WAL/SHM sidecar files + any renamed backup copies ──────
+# Matches aura.db, aura.db-shm, aura.db-wal, and anything like
+# aura.db.pre-merge-backup-* or aura_zendesk.db.retired-backup* — these
+# contain real user accounts (hashed passwords) and encrypted ITSM
+# credentials and must never be pushed.
+*.db*
+
+# ── Logs ───────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Claude Code local tool state — not project source ─────────────────────────
+.claude/
+
+# ── Internal planning docs / sample data — not for the public repo ────────────
+/files (1)/
+/TASKS_DONE.md
+/FULL_STACK_ARCHITECTURE_SPEC.md
+
+# ── Editor / OS ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
