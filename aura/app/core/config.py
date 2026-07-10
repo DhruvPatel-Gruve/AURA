@@ -2,7 +2,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _INSECURE_DEFAULT_ADMIN_PASSWORD = "changeme123"
@@ -31,33 +31,21 @@ class Settings(BaseSettings):
     # ── Application ───────────────────────────────────────────────────────────
     app_env: str = Field("development", pattern="^(development|production)$")
     app_secret_key: str = Field(..., min_length=32)
-    aura_enabled: bool = True
 
     # ── ITSM provider ─────────────────────────────────────────────────────────
-    # The *active* provider is DB-backed and switchable without a restart
-    # (see app/services/itsm_provider_state.py) — this is just a boot-time
-    # seed for that DB value on first run. Provider-specific fields below
-    # (jsm_*, zen_*) are all optional since only one provider's fields need
-    # to actually be set at once; get_itsm_client() validates the active
-    # provider's fields are present at first use, not at Settings boot time,
-    # since the active provider isn't known until after Settings loads.
-    itsm_provider: str = Field("jira", pattern="^(jira|zendesk)$")
-
-    # ── Jira Service Management ───────────────────────────────────────────────
-    jsm_base_url: str | None = Field(None, description="https://<domain>.atlassian.net")
-    jsm_project_key: str | None = Field(None, min_length=1)
-    jsm_api_email: str | None = Field(None)
-    jsm_api_token: str | None = Field(None)
+    # Every tenant's provider choice AND credentials are entirely DB-backed
+    # (platform_config, encrypted at rest — see app/core/crypto.py) and set
+    # via that tenant's own Setup Wizard, not read from process env vars.
+    # There is deliberately no ITSM_PROVIDER/JSM_*/ZEN_* Settings field here —
+    # a fresh boot needs zero ITSM configuration; only individual tenants do,
+    # later, through their own wizard.
+    #
     # Jira issue *type* (Task/Bug/Story/...) used when end users submit
     # tickets — distinct from AURA's own "category" concept (Network,
     # Hardware, etc, assigned later by triage_node), which is not a valid
-    # Jira issuetype name and must never be sent as one.
+    # Jira issuetype name and must never be sent as one. Global for now since
+    # it's a low-stakes operational default, not a credential.
     jsm_default_issue_type: str = Field("Task", min_length=1)
-
-    # ── Zendesk ───────────────────────────────────────────────────────────────
-    zen_subdomain: str | None = Field(None, description="https://<subdomain>.zendesk.com")
-    zen_api_email: str | None = Field(None)
-    zen_api_token: str | None = Field(None)
 
     # ── Gemini ────────────────────────────────────────────────────────────────
     gemini_api_key: str = Field(...)
@@ -119,11 +107,6 @@ class Settings(BaseSettings):
     rate_limit_frontend_logs: str = "60/minute"
 
     # ── Derived helpers ───────────────────────────────────────────────────────
-    @field_validator("jsm_base_url")
-    @classmethod
-    def strip_trailing_slash(cls, v: str | None) -> str | None:
-        return v.rstrip("/") if v else v
-
     @model_validator(mode="after")
     def _guard_production_footguns(self) -> "Settings":
         """Fail closed at startup rather than silently running an insecure

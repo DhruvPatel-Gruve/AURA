@@ -19,15 +19,11 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # ── Force test env vars before any app module is imported ─────────────────────
+# ITSM credentials are no longer process-level Settings — they're per-tenant,
+# encrypted in platform_config, and set explicitly by whichever test needs
+# them (see mock_jsm_search / individual test fixtures).
 os.environ.setdefault("APP_ENV", "development")
 os.environ.setdefault("APP_SECRET_KEY", "test-secret-key-32-chars-minimum!!")
-os.environ.setdefault("JSM_BASE_URL", "https://test.atlassian.net")
-os.environ.setdefault("JSM_PROJECT_KEY", "TEST")
-os.environ.setdefault("JSM_API_EMAIL", "test@example.com")
-os.environ.setdefault("JSM_API_TOKEN", "test-token")
-os.environ.setdefault("ZEN_SUBDOMAIN", "test")
-os.environ.setdefault("ZEN_API_EMAIL", "test@example.com")
-os.environ.setdefault("ZEN_API_TOKEN", "test-zen-token")
 os.environ.setdefault("GEMINI_API_KEY", "test-gemini-key")
 os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
 

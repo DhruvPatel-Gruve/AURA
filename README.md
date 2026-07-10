@@ -62,7 +62,7 @@ Everything runs as one FastAPI process: the API, the APScheduler background jobs
 
 | Layer | Technology |
 |---|---|
-| Backend framework | FastAPI (async, Python 3.14) |
+| Backend framework | FastAPI (async, Python 3.12+) |
 | Agent orchestration | LangGraph (`StateGraph`) |
 | LLM (triage + resolution) | Qwen3-8B via an OpenAI-compatible endpoint (Ollama or a remote vLLM server — env vars are still named `OLLAMA_*` for historical reasons) |
 | Embeddings | Google Gemini `gemini-embedding-2` (768-dim via Matryoshka truncation) |
@@ -217,25 +217,33 @@ State management is deliberately split: **React Query** owns all server data (ti
 
 ## Getting started
 
+AURA is multi-tenant — **you do not need a Jira/Zendesk account, or any ITSM
+credentials at all, to boot the app.** Only two things are required up front:
+a Python/Node toolchain, and a Google Gemini API key (used solely for
+embeddings). ITSM credentials are entered later, per tenant, through the
+Setup Wizard — see [step 5](#running-the-app) below.
+
 ### Prerequisites
 
-- Python 3.14 (a `.venv` is expected at repo root)
+- Python 3.12+ and pip
 - Node.js 18+ and npm
 - Docker (for Qdrant) — or a Qdrant instance reachable at the URL you configure
-- A Jira Service Management **or** Zendesk account with API credentials
-- A Google AI Studio (Gemini) API key
-- An OpenAI-compatible LLM endpoint (local Ollama running `qwen3:8b`, or a remote vLLM server)
+- A [Google AI Studio (Gemini) API key](https://aistudio.google.com/apikey) — required to boot
+- An OpenAI-compatible LLM endpoint (local [Ollama](https://ollama.com) running `qwen3:8b`, or a remote vLLM/OpenAI-compatible server) — only needed once a tenant actually processes a ticket, not to start the app or create tenants
+- A Jira Service Management **or** Zendesk account with API credentials — only needed by an individual tenant's admin, entered via their own Setup Wizard; not needed to boot the app or provision tenants
 
 ### Backend setup
 
-```powershell
+<details open><summary><b>macOS / Linux</b></summary>
+
+```bash
 # From the repo root
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+python3 -m venv .venv
+source .venv/bin/activate
 
 cd aura
 pip install -r requirements.txt
-cp .env.example .env      # then fill in your credentials
+cp .env.example .env      # fill in APP_SECRET_KEY and GEMINI_API_KEY at minimum
 
 # Qdrant must be running first (from repo root):
 cd ..
@@ -245,56 +253,84 @@ cd aura
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The first startup runs schema migrations automatically and seeds one bootstrap `master_admin` account (`DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD`, defaulting to `admin@aura.local` / `changeme123`) — log in as that account to create your first tenant. API docs: `http://localhost:8000/docs`.
+</details>
+
+<details><summary><b>Windows (PowerShell)</b></summary>
+
+```powershell
+# From the repo root
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+cd aura
+pip install -r requirements.txt
+cp .env.example .env      # fill in APP_SECRET_KEY and GEMINI_API_KEY at minimum
+
+# Qdrant must be running first (from repo root):
+cd ..
+docker compose up -d
+
+cd aura
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+</details>
+
+The first startup runs schema migrations automatically against a brand-new, empty SQLite database and seeds exactly one bootstrap `master_admin` account (`DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD` in `.env`, defaulting to `admin@aura.local` / `changeme123`) — nothing else exists yet: no tenants, no tickets, no other users. Log in as that account to create your first tenant. API docs: `http://localhost:8000/docs`.
 
 ### Frontend setup
 
-```powershell
+```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-App runs at `http://localhost:5173` and expects the backend on `:8000`. On first load it detects an incomplete setup and walks you through the wizard: branding → ITSM connection → categories → teams → agent thresholds → knowledge ingestion → review.
+App runs at `http://localhost:5173` and expects the backend on `:8000` (override via `frontend/.env` — copy from `.env.example` if you need a non-default backend URL). On first load, log in as `master_admin` to provision your first tenant (see below) — each tenant's own admin then sees the Setup Wizard on their first login.
 
 ## Configuration reference
 
-Key variables from `aura/.env.example` — see that file for the full annotated list:
+Key variables from `aura/.env.example` — see that file for the full annotated list. **Only `APP_SECRET_KEY` and `GEMINI_API_KEY` are required**; everything else has a working default for local development:
 
 ```
-APP_SECRET_KEY                # 32+ char random string (required)
-ITSM_PROVIDER                 # "jira" or "zendesk" — boot-time seed, admin can switch later
-JSM_BASE_URL / JSM_PROJECT_KEY / JSM_API_EMAIL / JSM_API_TOKEN
-ZEN_SUBDOMAIN / ZEN_API_EMAIL / ZEN_API_TOKEN
-GEMINI_API_KEY                # embeddings only, not resolution generation
-QDRANT_URL                    # http://localhost:6333
-OLLAMA_BASE_URL / OLLAMA_MODEL # OpenAI-compatible LLM endpoint (name kept for historical reasons)
-INGESTION_SYNC_INTERVAL_HOURS # default 6
+APP_SECRET_KEY                          # required — 32+ char random string; also derives the
+                                         # key used to encrypt every tenant's ITSM API tokens at rest
+GEMINI_API_KEY                          # required — embeddings only, not resolution generation
+DEFAULT_ADMIN_EMAIL / DEFAULT_ADMIN_PASSWORD  # bootstrap master_admin login (change after first use)
+QDRANT_URL                              # http://localhost:6333
+OLLAMA_BASE_URL / OLLAMA_MODEL          # OpenAI-compatible LLM endpoint (name kept for historical reasons)
+INGESTION_SYNC_INTERVAL_HOURS           # default 6
+CORS_ORIGINS                            # add your frontend's origin if not on the default port
 ```
 
-Runtime thresholds (confidence, abstention, polling interval, SLA per category) are **not** env-only — they're stored in `platform_config`/`category_config` and adjustable live from the Admin UI without a restart.
+There is deliberately no `ITSM_PROVIDER`/`JSM_*`/`ZEN_*` here — those are entirely per-tenant now, entered through each tenant's own Setup Wizard and stored encrypted in `platform_config`, never in a process env var.
+
+Runtime thresholds (confidence, abstention, polling interval, SLA per category) are **not** env-only either — they're stored in `platform_config`/`category_config` per tenant and adjustable live from that tenant's Admin UI without a restart.
 
 ## Running the app
 
 1. `docker compose up -d` — starts Qdrant.
 2. `uvicorn app.main:app --reload` (from `aura/`) — starts the API, scheduler, and WebSocket server together.
 3. `npm run dev` (from `frontend/`) — starts the SPA.
-4. Log in with the seeded `master_admin` account: `admin@aura.local` / `changeme123` (overridable via `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD`). Change it immediately — a startup guard actively blocks this insecure default when `APP_ENV=production`.
-5. As `master_admin`, create your first tenant (name, ITSM provider, admin email) — this hands back a one-time temporary password for that tenant's admin.
-6. Log in as the tenant admin, complete the Setup Wizard (including entering that tenant's real Jira/Zendesk credentials), trigger an initial knowledge ingestion, then either let the scheduler poll your live ITSM queue or submit test tickets through the End User "Submit Ticket" page.
+4. Log in with the seeded `master_admin` account: `admin@aura.local` / `changeme123` (overridable via `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD`). Change it immediately via the account menu (bottom-left of the sidebar) — a startup guard actively blocks this insecure default when `APP_ENV=production`.
+5. As `master_admin`, go to **Tenants** and create your first tenant (organization name, admin email, admin display name) — this hands back a one-time temporary password for that tenant's admin. No ITSM provider choice happens here.
+6. Log in as that tenant admin and complete the Setup Wizard: pick Jira or Zendesk and enter its real credentials (persisted encrypted immediately once the connection test succeeds), branding, categories, teams, agent thresholds, then trigger an initial knowledge ingestion.
+7. Either let the scheduler poll that tenant's live ITSM queue, or submit test tickets through the End User "Submit Ticket" page.
+
+Repeat steps 5–7 for as many tenants as you want — each is fully isolated (own users, own knowledge base collection, own ITSM connection).
 
 ## Testing
 
-```powershell
+```bash
 cd aura
-.\..\.venv\Scripts\Activate.ps1
+source ../.venv/bin/activate    # Windows: ..\.venv\Scripts\Activate.ps1
 python -m pytest tests/ -v
 ```
 
 240 tests across `test_rag/`, `test_agents/` (one file per node), `test_api/`, `test_scheduler/`, and `test_services/`. Every test seeds a `tenants` row and threads `tenant_id` through fixtures — nothing exercises a "no tenant" code path except the master_admin-specific tests. Fixtures stub out the Gemini API, Qdrant, and JSM/Zendesk HTTP calls — BM25 runs for real. The frontend currently has no automated test suite; verify UI changes manually against a running backend.
 
 Lint:
-```powershell
+```bash
 ruff check . --fix
 ```
 
