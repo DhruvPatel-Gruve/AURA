@@ -13,6 +13,7 @@ from app.core.logging import get_logger
 from app.db.sqlite import _get_session_factory, get_session
 from app.rag.ingestion_pipeline import IngestionPipeline
 from app.services import ingestion_lock, kill_switch, tenant_registry
+from app.services.notification_bus import notification_bus
 
 log = get_logger(__name__)
 
@@ -58,6 +59,8 @@ async def _sync_one_tenant(tenant_id: str) -> None:
                         skipped=event["tickets_skipped"],
                         chunks=event["chunks_created"],
                     )
+                    event_type = "INGESTION_COMPLETE" if event["status"] in ("completed", "failed") else "INGESTION_PROGRESS"
+                    await notification_bus.broadcast_to_tenant(tenant_id, event_type, event)
             except Exception as exc:
                 # APScheduler swallows exceptions by default; we re-log here for
                 # visibility then let the scheduler continue its schedule.

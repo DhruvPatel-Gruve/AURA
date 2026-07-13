@@ -8,9 +8,8 @@ Orchestration order per run:
   5. Fit BM25 on full batch of new chunks
   6. Embed all chunks (dense + sparse) in batches
   7. Upsert to Qdrant resolved_tickets collection
-  8. Write IngestionAuditEntry rows to SQLite
-  9. Advance sync cursor in platform_config
- 10. Finalise run record; emit INGESTION_COMPLETE
+  8. Advance sync cursor in platform_config
+  9. Finalise run record; emit INGESTION_COMPLETE
 """
 
 import uuid
@@ -24,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.qdrant_client import SPARSE_VECTOR_NAME, ensure_tenant_collection, get_qdrant_client
-from app.models.jsm import IngestionAuditEntry, IngestionRunSummary, JSMTicket, TicketChunk
+from app.models.jsm import IngestionRunSummary, JSMTicket, TicketChunk
 from app.rag.chunker import DynamicChunker
 from app.rag.embedder import EmbeddedChunk, GeminiEmbedder
 from app.services.itsm_client import get_itsm_client
@@ -40,6 +39,7 @@ class IngestionProgressEvent(TypedDict):
     status: str          # "started" | "fetched" | "processing" | "completed" | "failed"
     progress_pct: int
     tickets_fetched: int
+    tickets_processed: int  # how many of tickets_fetched have been reviewed so far
     tickets_indexed: int
     tickets_skipped: int
     chunks_created: int
@@ -75,12 +75,13 @@ class IngestionPipeline:
         summary = IngestionRunSummary(run_id=run_id, started_at=_utcnow())
         await self._upsert_run(summary)
 
-        def _emit(status: str, pct: int, msg: str = "") -> IngestionProgressEvent:
+        def _emit(status: str, pct: int, msg: str = "", processed: int = 0) -> IngestionProgressEvent:
             return IngestionProgressEvent(
                 run_id=run_id,
                 status=status,
                 progress_pct=pct,
                 tickets_fetched=summary.tickets_fetched,
+                tickets_processed=processed,
                 tickets_indexed=summary.tickets_indexed,
                 tickets_skipped=summary.tickets_skipped,
                 chunks_created=summary.chunks_created,
@@ -110,34 +111,34 @@ class IngestionPipeline:
                 yield _emit("completed", 100, "No new tickets to index")
                 return
 
-            # ── Steps 4–8: per-ticket processing ──────────────────────────────
+            # ── Steps 4–7: per-ticket processing ───────────────────────────────
             new_chunks: list[TicketChunk] = []
-            audit_entries: list[IngestionAuditEntry] = []
 
             for i, ticket in enumerate(tickets):
                 # 4a: skip — no useful content
                 if _is_empty(ticket):
                     summary.tickets_skipped += 1
-                    audit_entries.append(_make_audit(run_id, ticket, "skipped_no_resolution", self._project_key))
+                    log.debug("ingestion.ticket_skipped", ticket_id=ticket.ticket_id, reason="no_resolution")
                     continue
 
                 # 4b: dedup — ticket already indexed in Qdrant
                 if await self._already_indexed(ticket.ticket_id):
                     summary.tickets_skipped += 1
-                    audit_entries.append(_make_audit(run_id, ticket, "skipped_duplicate", self._project_key))
+                    log.debug("ingestion.ticket_skipped", ticket_id=ticket.ticket_id, reason="duplicate")
                     continue
 
                 # 4c: chunk
                 chunks = self._chunker.chunk(ticket)
                 new_chunks.extend(chunks)
-                audit_entries.append(
-                    _make_audit(run_id, ticket, "indexed", self._project_key, chunk_count=len(chunks))
-                )
+                log.debug("ingestion.ticket_indexed", ticket_id=ticket.ticket_id, chunk_count=len(chunks))
 
-                # Emit progress every 10 tickets
-                if (i + 1) % 10 == 0:
-                    pct = min(5 + int(((i + 1) / len(tickets)) * 85), 90)
-                    yield _emit("processing", pct, f"Processed {i + 1}/{len(tickets)} tickets")
+                # Emit progress after every ticket so the wizard/Admin UI can
+                # show a live "X/Y tickets" counter, not just a percentage.
+                pct = min(5 + int(((i + 1) / len(tickets)) * 85), 90)
+                yield _emit(
+                    "processing", pct, f"Processed {i + 1}/{len(tickets)} tickets",
+                    processed=i + 1,
+                )
 
             # ── Step 5: fit BM25 on full new-chunk corpus ──────────────────────
             if new_chunks:
@@ -154,15 +155,12 @@ class IngestionPipeline:
                 # Count indexed tickets (unique ticket_ids in new_chunks)
                 summary.tickets_indexed = len({c.ticket_id for c in new_chunks})
 
-            # ── Step 8: write audit entries ────────────────────────────────────
-            await self._write_audit_entries(audit_entries)
-
-            # ── Step 9: advance cursor ─────────────────────────────────────────
+            # ── Step 8: advance cursor ──────────────────────────────────────────
             await self._advance_cursor(_utcnow())
 
-            # ── Step 10: finalise ──────────────────────────────────────────────
+            # ── Step 9: finalise ────────────────────────────────────────────────
             await self._finalise(summary, status="completed")
-            yield _emit("completed", 100)
+            yield _emit("completed", 100, processed=len(tickets))
             log.info(
                 "ingestion.run_complete",
                 run_id=run_id,
@@ -276,29 +274,6 @@ class IngestionPipeline:
         )
         await self._db.commit()
 
-    async def _write_audit_entries(self, entries: list[IngestionAuditEntry]) -> None:
-        for entry in entries:
-            await self._db.execute(
-                text(
-                    """
-                    INSERT INTO audit_log
-                        (entry_id, tenant_id, ticket_id, action_taken, abstained,
-                         audit_steps, created_at)
-                    VALUES
-                        (:entry_id, :tenant_id, :ticket_id, :action_taken, 0,
-                         '[]', :created_at)
-                    """
-                ),
-                {
-                    "entry_id": str(uuid.uuid4()),
-                    "tenant_id": self._tenant_id,
-                    "ticket_id": entry.ticket_id,
-                    "action_taken": entry.action,
-                    "created_at": entry.timestamp.isoformat(),
-                },
-            )
-        await self._db.commit()
-
 
 # ── Shared upsert (used by both ticket and document ingestion) ────────────────
 
@@ -365,20 +340,3 @@ def _utcnow() -> datetime:
 
 def _is_empty(ticket: JSMTicket) -> bool:
     return not ticket.resolution_note and not ticket.comments
-
-
-def _make_audit(
-    run_id: str,
-    ticket: JSMTicket,
-    action: str,
-    project_key: str | None,
-    chunk_count: int = 0,
-) -> IngestionAuditEntry:
-    return IngestionAuditEntry(
-        run_id=run_id,
-        ticket_id=ticket.ticket_id,
-        action=action,  # type: ignore[arg-type]
-        chunk_count=chunk_count,
-        timestamp=_utcnow(),
-        source_project=project_key,
-    )

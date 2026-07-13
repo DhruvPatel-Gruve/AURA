@@ -30,7 +30,6 @@ from dataclasses import dataclass
 
 from rank_bm25 import BM25Okapi
 
-from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.qdrant_client import get_qdrant_client
 from app.models.agent_state import RetrievedChunk
@@ -65,28 +64,28 @@ class HybridRetriever:
 
     def __init__(self) -> None:
         self._embedder = GeminiEmbedder()
-        self._settings = get_settings()
 
     async def retrieve(
         self,
         query_text: str,
+        collection: str,
         top_k: int = 5,
-        collection: str | None = None,
         query_vector: list[float] | None = None,
     ) -> list[RetrievedChunk]:
         """Run hybrid retrieval and return up to top_k chunks.
 
         Args:
             query_text:   Raw query string (ticket summary + description).
+            collection:   Qdrant collection name — every caller resolves this
+                          via ensure_tenant_collection(tenant_id) first.
             top_k:        Number of results to return after RRF fusion.
-            collection:   Qdrant collection name; defaults to resolved_tickets.
             query_vector: Pre-computed 768-dim query embedding.  If provided,
                           the Gemini API call is skipped (reuses node 2's vector).
 
         Returns:
             list[RetrievedChunk] sorted by fused RRF score descending.
         """
-        col = collection or self._settings.qdrant_resolved_collection
+        col = collection
         n_candidates = top_k * _CANDIDATE_MULTIPLIER
 
         # ── Stage 1: dense retrieval ──────────────────────────────────────────
@@ -121,7 +120,7 @@ class HybridRetriever:
     async def probe_top_score(
         self,
         query_text: str,
-        collection: str | None = None,
+        collection: str,
         query_vector: list[float] | None = None,
     ) -> tuple[float, list[float]]:
         """Return (top_score, query_vector) for the abstention / priority checks.
@@ -129,7 +128,7 @@ class HybridRetriever:
         Fetches only 1 result — much cheaper than a full retrieve() call.
         Also returns the query_vector so callers can cache it for later reuse.
         """
-        col = collection or self._settings.qdrant_resolved_collection
+        col = collection
 
         if query_vector is None:
             query_vector = await self._embedder.embed_query_text(query_text)

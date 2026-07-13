@@ -8,6 +8,7 @@ Qdrant stats:   GET /admin/qdrant/stats
 Audit:          GET /admin/audit-log, GET /admin/audit-log/export
 """
 
+import secrets
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated
@@ -31,6 +32,7 @@ from app.models.api_schemas import (
     PlatformConfigResponse,
     PlatformConfigUpdate,
     QdrantStatsResponse,
+    ResetUserPasswordResponse,
     RollbackResponse,
     UserCreate,
     UserPublic,
@@ -391,6 +393,42 @@ async def delete_user(
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="User not found")
     return OkResponse()
+
+
+@router.post("/users/{user_id}/reset-password", response_model=ResetUserPasswordResponse)
+async def reset_user_password(
+    user_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[dict, Depends(require_admin)],
+) -> ResetUserPasswordResponse:
+    """Issue a fresh one-time temporary password for a user in this tenant.
+
+    There is no way to recover a user's actual password — it's stored as a
+    bcrypt hash, never reversible — so this is the only way an admin can get
+    someone back into a locked-out account: overwrite it with a new one and
+    hand it to them directly.
+    """
+    row = (await db.execute(
+        sa_text("SELECT email FROM users WHERE user_id = :uid AND tenant_id = :tenant"),
+        {"uid": user_id, "tenant": current_user["tenant_id"]},
+    )).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    temp_password = secrets.token_urlsafe(12)
+    await db.execute(
+        sa_text("UPDATE users SET hashed_password = :pw WHERE user_id = :uid"),
+        {"pw": hash_password(temp_password), "uid": user_id},
+    )
+    # Revoke this user's sessions — same hygiene as the self-service
+    # change-password endpoint, so a stolen/shared session doesn't survive
+    # a reset intended to lock someone else out.
+    await db.execute(
+        sa_text("UPDATE sessions SET revoked = 1 WHERE user_id = :uid"),
+        {"uid": user_id},
+    )
+
+    return ResetUserPasswordResponse(email=row[0], temporary_password=temp_password)
 
 
 # ── Categories ────────────────────────────────────────────────────────────────

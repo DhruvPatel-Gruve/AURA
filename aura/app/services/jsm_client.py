@@ -158,6 +158,24 @@ class JSMClient:
         log.info("jsm.search_complete", total=len(tickets), jql=jql)
         return tickets
 
+    async def count_tickets(self, jql_extra: str = "") -> int:
+        """Total ticket count for the configured project (optionally
+        narrowed by extra JQL), without fetching full issue data. Used by
+        the Setup Wizard's connection test — same Agile board endpoint
+        search_tickets() uses, just maxResults=1 to keep it cheap.
+        """
+        clauses = [f"project = {self._project_key}"]
+        if jql_extra:
+            clauses.append(jql_extra)
+        jql = " AND ".join(clauses)
+        board_id = await self._get_board_id()
+        resp = await self._http().get(
+            f"/rest/agile/1.0/board/{board_id}/issue",
+            params={"jql": jql, "maxResults": 1, "fields": "key"},
+        )
+        resp.raise_for_status()
+        return resp.json().get("total", 0)
+
     # ── Single ticket ─────────────────────────────────────────────────────────
 
     @_retry_on_rate_limit()

@@ -5,9 +5,6 @@ export const authApi = {
   login: (data: LoginRequest) =>
     apiClient.post<LoginResponse>('/auth/login', data).then((r) => r.data),
 
-  refresh: () =>
-    apiClient.post<{ access_token: string }>('/auth/refresh').then((r) => r.data),
-
   logout: () =>
     apiClient.post('/auth/logout'),
 

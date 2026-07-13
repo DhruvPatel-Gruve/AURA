@@ -122,6 +122,11 @@ class UserPublic(BaseModel):
     jira_account_id: str | None = None
 
 
+class ResetUserPasswordResponse(BaseModel):
+    email: str
+    temporary_password: str
+
+
 # ── Categories ────────────────────────────────────────────────────────────────
 
 class CategoryCreate(BaseModel):

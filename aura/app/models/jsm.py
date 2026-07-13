@@ -47,15 +47,6 @@ class DocumentChunk(BaseModel):
     metadata: DocumentChunkMetadata
 
 
-class IngestionAuditEntry(BaseModel):
-    run_id: str
-    ticket_id: str
-    action: Literal["indexed", "skipped_duplicate", "skipped_no_resolution"]
-    chunk_count: int = 0
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-    source_project: str | None = None
-
-
 class IngestionRunSummary(BaseModel):
     run_id: str
     started_at: datetime

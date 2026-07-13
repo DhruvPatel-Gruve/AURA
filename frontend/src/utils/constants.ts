@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Users, Tag, Settings, Power,
   RotateCcw, FileText, Database, Activity,
   BarChart2, TrendingUp, Target, UserCheck,
-  AlertCircle, DollarSign, CheckSquare,
+  AlertCircle, CheckSquare,
   Inbox, MessageSquare, PlusCircle, Users2,
   Network, Building2,
 } from 'lucide-react'
@@ -61,7 +61,6 @@ export const ROLE_NAV: Record<Role, NavItem[]> = {
     { label: 'Team',           path: '/manager/team',        icon: UserCheck       },
     { label: 'Abstention',     path: '/manager/abstention',  icon: AlertCircle     },
     { label: 'Collisions',     path: '/manager/collisions',  icon: Users2          },
-    { label: 'Cost Savings',   path: '/manager/savings',     icon: DollarSign      },
     { label: 'Approvals',      path: '/manager/approvals',   icon: CheckSquare     },
   ],
   technician: [

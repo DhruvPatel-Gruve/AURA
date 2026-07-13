@@ -3,6 +3,7 @@ import { useAuthStore } from '@/store/authStore'
 import { useConfigStore } from '@/store/configStore'
 import { useNotificationStore } from '@/store/notificationStore'
 import { useToastStore } from '@/store/toastStore'
+import { useIngestionProgressStore, type IngestionProgressEvent } from '@/store/ingestionProgressStore'
 import { useQueryClient } from '@tanstack/react-query'
 import { WS_EVENTS } from '@/utils/constants'
 import type { WSEvent } from '@/api/types'
@@ -125,6 +126,7 @@ export function useWebSocket() {
       }
       case WS_EVENTS.INGESTION_PROGRESS:
       case WS_EVENTS.INGESTION_COMPLETE:
+        useIngestionProgressStore.getState().setLatest(payload as unknown as IngestionProgressEvent)
         qc.invalidateQueries({ queryKey: ['admin', 'qdrant', 'stats'] })
         qc.invalidateQueries({ queryKey: ['ingestion', 'status'] })
         qc.invalidateQueries({ queryKey: ['ingestion', 'runs'] })

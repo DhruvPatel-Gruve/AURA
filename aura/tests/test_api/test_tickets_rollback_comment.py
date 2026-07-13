@@ -111,7 +111,6 @@ async def test_rollback_comment_deletes_and_updates_audit_log(db_session):
         for p in _lifespan_patches():
             stack.enter_context(p)
         stack.enter_context(patch("app.services.itsm_client.get_itsm_client", return_value=mock_jsm))
-        stack.enter_context(patch("app.api.v1.routes.tickets.notification_bus.broadcast_to_all", new=AsyncMock()))
         app = _app(db_session, _FAKE_TECH)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             response = await ac.post("/api/v1/tickets/KAN-20/rollback-comment")
@@ -191,7 +190,6 @@ async def test_admin_can_rollback_without_acknowledging(db_session):
         for p in _lifespan_patches():
             stack.enter_context(p)
         stack.enter_context(patch("app.services.itsm_client.get_itsm_client", return_value=mock_jsm))
-        stack.enter_context(patch("app.api.v1.routes.tickets.notification_bus.broadcast_to_all", new=AsyncMock()))
         app = _app(db_session, _ADMIN_USER)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             response = await ac.post("/api/v1/tickets/KAN-24/rollback-comment")
@@ -213,7 +211,6 @@ async def test_post_ticket_comment_posts_and_syncs_audit_log(db_session):
         for p in _lifespan_patches():
             stack.enter_context(p)
         stack.enter_context(patch("app.services.itsm_client.get_itsm_client", return_value=mock_jsm))
-        stack.enter_context(patch("app.api.v1.routes.tickets.notification_bus.broadcast_to_all", new=AsyncMock()))
         app = _app(db_session, _FAKE_TECH)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             response = await ac.post(

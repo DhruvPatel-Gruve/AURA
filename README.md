@@ -195,7 +195,7 @@ All routes under `/api/v1`, grouped by `app/api/v1/routes/`:
 | `master.py` | master_admin only: list/create/suspend/reactivate tenants, reset a tenant's admin password — zero ticket/audit visibility |
 | `setup.py` | First-run setup wizard: status, connection tests, save/progress/complete (per tenant) |
 | `admin.py` | Platform config, branding, kill switch, user/category CRUD, rollback history, Qdrant stats/rebuild, document management, audit log export |
-| `dashboard.py` | System health, technician stats, and the full Manager analytics suite (SLA, resolution, confidence, team performance, abstention, collisions, cost savings, approvals) |
+| `dashboard.py` | System health, technician stats, and the full Manager analytics suite (SLA, resolution, confidence, team performance, abstention, collisions, approvals) |
 | `tickets.py` | Ticket list/detail, low-confidence queue, acknowledge, approve/reject/edit a queued draft, roll back and re-post a comment, end-user submission |
 | `chat.py` | End-user live chat, RAG-grounded, persisted per session |
 | `ingestion.py` / `documents.py` | Trigger/monitor KB ingestion; upload documents into the knowledge base |
@@ -209,7 +209,7 @@ Role-based single-page app, five distinct experiences behind one login:
 
 - **Master Admin** — Tenants: create a client organization + its first admin account, rename, suspend/reactivate, reset a locked-out admin's password. Nothing else — no ticket/audit data of any tenant is ever visible here.
 - **Admin** — Dashboard, Users, Categories, Agent Config (thresholds), Kill Switch, Rollback History, Audit Log, Knowledge Index (Qdrant stats/rebuild), System Health, and the 9-step Setup Wizard.
-- **Manager** — Dashboard, SLA Compliance, Resolution Analytics, Confidence Analytics, Team Performance, Abstention Report, Collision Log, Cost Savings Report, Approval Queue.
+- **Manager** — Dashboard, SLA Compliance, Resolution Analytics, Confidence Analytics, Team Performance, Abstention Report, Collision Log, Approval Queue.
 - **Technician** — Dashboard, unified Ticket Queue (acknowledge, view live comment thread, approve/edit/reject AURA's draft, roll back and correct a posted comment).
 - **End User** — Dashboard, My Tickets, Submit Ticket, Live Chat.
 

@@ -39,7 +39,6 @@ import ConfidenceAnalytics from '@/pages/manager/ConfidenceAnalytics'
 import TeamPerformance     from '@/pages/manager/TeamPerformance'
 import AbstentionReport    from '@/pages/manager/AbstentionReport'
 import CollisionLog        from '@/pages/manager/CollisionLog'
-import CostSavingsReport   from '@/pages/manager/CostSavingsReport'
 import ApprovalQueue       from '@/pages/manager/ApprovalQueue'
 
 // Technician pages
@@ -68,7 +67,7 @@ const queryClient = new QueryClient({
 })
 
 function AppRoutes() {
-  const { initTheme, setupComplete, setSetupComplete, setCompanyBranding, setItsmProvider } = useConfigStore()
+  const { initTheme, setupComplete, setSetupComplete, setCompanyBranding, clearBranding, setItsmProvider } = useConfigStore()
   const { accessToken, role } = useAuthStore()
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -84,9 +83,15 @@ function AppRoutes() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Fetch company branding whenever the user logs in or refreshes while authenticated
+  // Fetch company branding whenever the user logs in or refreshes while authenticated.
+  // master_admin has no tenant_id and manages no single tenant's identity — it always
+  // gets the generic AURA look, never a tenant's logo/name/accent.
   useEffect(() => {
     if (!accessToken) return
+    if (role === 'master_admin') {
+      clearBranding()
+      return
+    }
     apiClient
       .get<{ company_name: string | null; company_logo: string | null; accent_color: string | null; itsm_provider?: string }>('/admin/branding')
       .then(({ data }) => {
@@ -95,7 +100,7 @@ function AppRoutes() {
       })
       .catch(() => { /* backend not yet configured — silent */ })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken])
+  }, [accessToken, role])
 
   // Check setup status once a session exists — /setup/status now requires
   // auth (setup is per-tenant), so there's nothing to check pre-login.
@@ -189,7 +194,6 @@ function AppRoutes() {
           <Route path="/manager/team"          element={<TeamPerformance />} />
           <Route path="/manager/abstention"    element={<AbstentionReport />} />
           <Route path="/manager/collisions"    element={<CollisionLog />} />
-          <Route path="/manager/savings"       element={<CostSavingsReport />} />
           <Route path="/manager/approvals"     element={<ApprovalQueue />} />
         </Route>
       </Route>

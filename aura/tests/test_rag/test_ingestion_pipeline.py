@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.rag.ingestion_pipeline import IngestionPipeline, _is_empty, _make_audit
+from app.rag.ingestion_pipeline import IngestionPipeline, _is_empty
 from tests.conftest import SAMPLE_TENANT_ID as TENANT
 
 

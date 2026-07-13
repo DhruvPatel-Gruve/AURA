@@ -171,7 +171,7 @@ Key node behaviors:
 | `auth.py` | login/refresh/logout/me (JWT + httpOnly refresh cookie) |
 | `setup.py` | setup wizard status/save/progress/complete |
 | `admin.py` | platform config, branding, kill switch, user/category CRUD, rollback, Qdrant stats/rebuild, documents, audit log export (largest file, ~25 routes; `/admin/audit` and `/admin/audit/export` are intentional back-compat aliases, kept alive by regression tests — do not remove) |
-| `dashboard.py` | system health, technician stats, manager analytics (SLA compliance, resolution/confidence analytics, team performance, abstention report, duplicate/collision log, cost savings, approval queue) |
+| `dashboard.py` | system health, technician stats, manager analytics (SLA compliance, resolution/confidence analytics, team performance, abstention report, duplicate/collision log, approval queue) |
 | `tickets.py` | ticket list/detail, low-confidence queue, acknowledge/approve/reject/edit, submission |
 | `chat.py` | end-user live chat, RAG-grounded, persisted to `chat_messages` |
 | `ingestion.py` / `documents.py` | JSM sync trigger/status/runs; PDF/DOCX upload pipeline |

@@ -104,7 +104,6 @@ async def test_approve_posts_comment_and_starts_tracking(db_session):
         for p in _lifespan_patches():
             stack.enter_context(p)
         stack.enter_context(patch("app.services.itsm_client.get_itsm_client", return_value=mock_jsm))
-        stack.enter_context(patch("app.api.v1.routes.tickets.notification_bus.broadcast_to_all", new=AsyncMock()))
         app = create_app()
         app.dependency_overrides[require_technician] = lambda: _FAKE_TECH
         app.dependency_overrides[get_db] = lambda: db_session
@@ -146,7 +145,6 @@ async def test_approve_never_calls_transition_apis_when_toggle_disabled(db_sessi
         for p in _lifespan_patches():
             stack.enter_context(p)
         stack.enter_context(patch("app.services.itsm_client.get_itsm_client", return_value=mock_jsm))
-        stack.enter_context(patch("app.api.v1.routes.tickets.notification_bus.broadcast_to_all", new=AsyncMock()))
         app = create_app()
         app.dependency_overrides[require_technician] = lambda: _FAKE_TECH
         app.dependency_overrides[get_db] = lambda: db_session
@@ -238,7 +236,6 @@ async def test_approve_tracks_even_when_reporter_unknown(db_session):
         for p in _lifespan_patches():
             stack.enter_context(p)
         stack.enter_context(patch("app.services.itsm_client.get_itsm_client", return_value=mock_jsm))
-        stack.enter_context(patch("app.api.v1.routes.tickets.notification_bus.broadcast_to_all", new=AsyncMock()))
         app = create_app()
         app.dependency_overrides[require_technician] = lambda: _FAKE_TECH
         app.dependency_overrides[get_db] = lambda: db_session
@@ -408,7 +405,6 @@ async def test_admin_can_approve_without_acknowledging(db_session):
         for p in _lifespan_patches():
             stack.enter_context(p)
         stack.enter_context(patch("app.services.itsm_client.get_itsm_client", return_value=mock_jsm))
-        stack.enter_context(patch("app.api.v1.routes.tickets.notification_bus.broadcast_to_all", new=AsyncMock()))
         app = create_app()
         app.dependency_overrides[require_technician] = lambda: _ADMIN_USER
         app.dependency_overrides[get_db] = lambda: db_session
@@ -433,7 +429,6 @@ async def test_admin_can_approve_across_any_team(db_session):
         for p in _lifespan_patches():
             stack.enter_context(p)
         stack.enter_context(patch("app.services.itsm_client.get_itsm_client", return_value=mock_jsm))
-        stack.enter_context(patch("app.api.v1.routes.tickets.notification_bus.broadcast_to_all", new=AsyncMock()))
         app = create_app()
         app.dependency_overrides[require_technician] = lambda: _ADMIN_USER
         app.dependency_overrides[get_db] = lambda: db_session

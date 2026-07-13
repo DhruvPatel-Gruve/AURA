@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Bell, Sun, Moon, LogOut, CheckCheck, X } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useConfigStore } from '@/store/configStore'
+import { useAuthStore } from '@/store/authStore'
 import { useNotificationStore } from '@/store/notificationStore'
 import { cn } from '@/utils/cn'
 
@@ -113,7 +114,9 @@ export function TopBar() {
   const { logout }                                  = useAuth()
   const { theme, setTheme, killSwitchActive,
           companyName, companyLogo }                = useConfigStore()
+  const { role }                                    = useAuthStore()
   const { unreadCount }                             = useNotificationStore()
+  const showClientBranding = role !== 'master_admin' && (companyLogo || companyName)
   const [panelOpen, setPanelOpen]                   = useState(false)
   const panelRef                                    = useRef<HTMLDivElement>(null)
 
@@ -139,7 +142,7 @@ export function TopBar() {
       <div className="flex items-center gap-3">
 
         {/* Client company identity */}
-        {(companyLogo || companyName) && (
+        {showClientBranding && (
           <div className="flex items-center gap-2 pr-2 border-r border-line">
             {companyLogo && (
               <img

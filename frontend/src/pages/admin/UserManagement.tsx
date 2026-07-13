@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, UserX, UserCheck, Search, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, Pencil, UserX, UserCheck, Search, ArrowUp, ArrowDown, KeyRound, Copy, Check } from 'lucide-react'
 import { adminApi } from '@/api/admin.api'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Badge, type BadgeTone } from '@/components/ui/Badge'
@@ -11,6 +11,41 @@ import { cn } from '@/utils/cn'
 import { useConfigStore } from '@/store/configStore'
 import { ITSM_PROVIDER_SHORT_LABELS } from '@/utils/constants'
 import type { UserPublic, UserCreate, UserUpdate } from '@/api/types'
+
+// One-time reveal of a freshly issued temporary password — the backend
+// never returns a plaintext password again after this response, so this
+// is the admin's only chance to hand it to the user.
+function CredentialReveal({ email, password }: { email: string; password: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-body">
+        Share these credentials with the user now — this password will not be shown again.
+      </p>
+      <div className="rounded-lg border border-line bg-sunken p-3 space-y-2 font-mono text-sm">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-faint">Email</span>
+          <span className="text-ink">{email}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-faint">Password</span>
+          <span className="text-ink">{password}</span>
+        </div>
+      </div>
+      <button
+        onClick={() => {
+          navigator.clipboard.writeText(`${email} / ${password}`)
+          setCopied(true)
+          setTimeout(() => setCopied(false), 2000)
+        }}
+        className="btn-secondary w-full"
+      >
+        {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+        {copied ? 'Copied' : 'Copy to clipboard'}
+      </button>
+    </div>
+  )
+}
 
 const ROLES = ['admin', 'manager', 'technician', 'enduser'] as const
 
@@ -60,6 +95,8 @@ export default function UserManagement() {
   const [editUser, setEditUser]     = useState<UserPublic | null>(null)
   const [form, setForm]             = useState<UserFormState>(emptyForm)
   const [editForm, setEditForm]     = useState<Partial<UserUpdate>>({})
+  const [resetConfirmUser, setResetConfirmUser] = useState<UserPublic | null>(null)
+  const [reveal, setReveal] = useState<{ email: string; password: string } | null>(null)
 
   const [search, setSearch]         = useState('')
   const [roleFilter, setRoleFilter] = useState('')
@@ -111,6 +148,11 @@ export default function UserManagement() {
   const reactivateMutation = useMutation({
     mutationFn: (id: string) => adminApi.updateUser(id, { is_active: true }),
     onSuccess:  () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
+  })
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: (id: string) => adminApi.resetUserPassword(id),
+    onSuccess:  (res) => { setResetConfirmUser(null); setReveal({ email: res.email, password: res.temporary_password }) },
   })
 
   const openEdit = (user: UserPublic) => {
@@ -208,6 +250,13 @@ export default function UserManagement() {
                       <div className="flex items-center gap-1">
                         <button onClick={() => openEdit(u)} className="btn-ghost !px-2 !py-1 text-xs">
                           <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setResetConfirmUser(u)}
+                          className="btn-ghost !px-2 !py-1 text-xs"
+                          title="Reset password"
+                        >
+                          <KeyRound className="h-3.5 w-3.5" />
                         </button>
                         {u.is_active ? (
                           <button
@@ -427,6 +476,35 @@ export default function UserManagement() {
             </button>
           </div>
         </div>
+      </Modal>
+
+      {/* Reset password confirmation */}
+      <Modal open={!!resetConfirmUser} onClose={() => setResetConfirmUser(null)} title="Reset Password" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-body">
+            This immediately replaces <span className="font-medium text-ink">{resetConfirmUser?.display_name}</span>'s
+            password with a new one-time temporary password and signs them out everywhere. Their current password will
+            stop working right away.
+          </p>
+          {resetPasswordMutation.error && (
+            <p className="text-xs text-red-500">Failed to reset password. Please try again.</p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <button onClick={() => setResetConfirmUser(null)} className="btn-ghost">Cancel</button>
+            <button
+              onClick={() => resetConfirmUser && resetPasswordMutation.mutate(resetConfirmUser.user_id)}
+              disabled={resetPasswordMutation.isPending}
+              className="btn-primary"
+            >
+              {resetPasswordMutation.isPending ? <LoadingSpinner size="sm" /> : 'Reset Password'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* One-time credential reveal — shown after a successful reset */}
+      <Modal open={!!reveal} onClose={() => setReveal(null)} title="Temporary Password Issued">
+        {reveal && <CredentialReveal email={reveal.email} password={reveal.password} />}
       </Modal>
     </div>
   )

@@ -73,6 +73,7 @@ async def test_jsm_connection(
     from base64 import b64encode
 
     from app.core.url_safety import UnsafeURLError, assert_safe_external_url
+    from app.services.jsm_client import JSMClient
 
     url = body.base_url.rstrip("/")
 
@@ -83,12 +84,27 @@ async def test_jsm_connection(
 
     token = b64encode(f"{body.user_email}:{body.api_token}".encode()).decode()
     headers = {"Authorization": f"Basic {token}", "Accept": "application/json"}
+    project_key = body.project_key.strip().upper()
 
     try:
         async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
             # Validate credentials — /myself is the most reliable auth check
             me = await client.get(f"{url}/rest/api/3/myself", headers=headers)
             me.raise_for_status()
+
+        # Total ticket count in the project (any status) — a plain "yes,
+        # we're really connected to your data" signal. Deliberately not
+        # filtered to resolved/Done tickets: a project with no Done tickets
+        # yet would otherwise show a misleading 0 here even though it's
+        # fully reachable. Uses the same Agile board endpoint the real
+        # ingestion pipeline (search_tickets()) already relies on — NOT
+        # the classic /rest/api/3/search platform endpoint, which
+        # Atlassian sunset in 2025 (now returns 410 Gone on Cloud).
+        async with JSMClient(
+            base_url=url, project_key=project_key,
+            api_email=body.user_email, api_token=body.api_token,
+        ) as jsm:
+            ticket_count = await jsm.count_tickets()
     except Exception as exc:
         return JSMTestResponse(success=False, error=str(exc))
 
@@ -116,7 +132,7 @@ async def test_jsm_connection(
     await itsm_provider_state.set(db, tenant_id, "jira")
     await refresh_tenant_credentials(db, tenant_id)
 
-    return JSMTestResponse(success=True, ticket_count=0)
+    return JSMTestResponse(success=True, ticket_count=ticket_count)
 
 
 @router.post("/test-zendesk", response_model=ZendeskTestResponse)

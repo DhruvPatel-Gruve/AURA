@@ -174,7 +174,7 @@ export default function Step2_JSMConnection({ initialData, onChange }: Props) {
           <div className="flex items-center gap-2.5 rounded-lg bg-sunken border border-line px-3.5 py-2.5">
             <Badge tone="success" dot>Connected</Badge>
             <span className="text-sm text-body font-mono tabular-nums">
-              {ticketCount?.toLocaleString() ?? 0} resolved tickets available
+              {ticketCount?.toLocaleString() ?? 0} tickets found in this project
             </span>
           </div>
         )}

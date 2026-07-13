@@ -39,13 +39,6 @@ export interface ManagerCollisionsData {
   collision_events: Array<{ ticket_id: string; claimants: string[]; created_at: string }>
 }
 
-export interface ManagerCostSavingsData {
-  hours_saved:        number
-  cost_reduction:     number
-  zero_touch_per_week: number
-  trend_data:          Array<{ date: string; zero_touch: number }>
-}
-
 export interface ManagerApprovalItem {
   queue_id:          string
   ticket_id:         string
@@ -150,9 +143,6 @@ export const dashboardApi = {
 
   getManagerCollisions: (params?: DateRange) =>
     apiClient.get<ManagerCollisionsData>('/dashboard/manager/collisions', { params }).then((r) => r.data),
-
-  getManagerCostSavings: (params?: DateRange) =>
-    apiClient.get<ManagerCostSavingsData>('/dashboard/manager/cost-savings', { params }).then((r) => r.data),
 
   getManagerApprovals: (params?: ManagerApprovalsParams) =>
     apiClient.get<ManagerApprovalsResponse>('/dashboard/manager/approvals', { params }).then((r) => r.data),

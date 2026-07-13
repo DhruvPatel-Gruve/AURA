@@ -3,8 +3,6 @@ import { Check } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import type { ItsmProvider } from '@/utils/constants'
 
-export type { ItsmProvider }
-
 export interface Step2ProviderData {
   itsm_provider: ItsmProvider
 }

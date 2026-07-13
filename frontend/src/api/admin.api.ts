@@ -2,7 +2,7 @@ import { apiClient } from './client'
 import type {
   UserPublic, UserCreate, UserUpdate,
   CategoryConfig, PlatformConfig,
-  RollbackRecord, AuditEntry, SystemHealthResponse,
+  RollbackRecord, AuditEntry,
   DocumentSummary,
 } from './types'
 
@@ -31,8 +31,8 @@ export const adminApi = {
     apiClient.post<UserPublic>('/admin/users', data).then((r) => r.data),
   updateUser: (id: string, data: UserUpdate) =>
     apiClient.patch<UserPublic>(`/admin/users/${id}`, data).then((r) => r.data),
-  deleteUser: (id: string) =>
-    apiClient.delete(`/admin/users/${id}`).then((r) => r.data),
+  resetUserPassword: (id: string) =>
+    apiClient.post<{ email: string; temporary_password: string }>(`/admin/users/${id}/reset-password`).then((r) => r.data),
 
   // ── Platform config ────────────────────────────────────────────────────────
   getConfig: () =>
@@ -69,8 +69,6 @@ export const adminApi = {
   // ── Qdrant ────────────────────────────────────────────────────────────────
   getQdrantStats: () =>
     apiClient.get<Record<string, unknown>>('/admin/qdrant/stats').then((r) => r.data),
-  triggerReingestion: () =>
-    apiClient.post('/admin/qdrant/trigger-ingestion').then((r) => r.data),
   rebuildIndex: () =>
     apiClient.post('/admin/qdrant-rebuild').then((r) => r.data),
 
@@ -79,8 +77,4 @@ export const adminApi = {
     apiClient.get<{ documents: DocumentSummary[] }>('/admin/documents').then((r) => r.data.documents),
   deleteDocument: (docId: string) =>
     apiClient.delete(`/admin/documents/${docId}`).then((r) => r.data),
-
-  // ── System health ─────────────────────────────────────────────────────────
-  getSystemHealth: () =>
-    apiClient.get<SystemHealthResponse>('/admin/system-health').then((r) => r.data),
 }

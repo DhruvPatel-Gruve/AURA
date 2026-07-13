@@ -6,16 +6,13 @@ services, and route handlers that need to push real-time events to clients.
 Event envelope:
     { "event_type": str, "payload": dict, "timestamp": ISO-8601 }
 
-Broadcast targets — every one of these (except `broadcast_to_all`) is scoped
-to a single tenant, since team_id is only unique within a tenant and "admin"
-must mean "this tenant's admin," never every admin across every client:
+Broadcast targets — every one of these is scoped to a single tenant, since
+team_id is only unique within a tenant and "admin" must mean "this tenant's
+admin," never every admin across every client:
     send_to_user(user_id, ...)                    — single user
     broadcast_to_team(tenant_id, team_id, ...)     — one team, one tenant
     broadcast_to_admins(tenant_id, ...)            — that tenant's admins only
     broadcast_to_tenant(tenant_id, ...)            — every connected user in one tenant
-    broadcast_to_all(...)                          — every connected user, every tenant
-                                                      (master_admin / platform-wide use only —
-                                                      no tenant-scoped event should call this)
 """
 
 import asyncio
@@ -141,18 +138,6 @@ class NotificationBus:
             for uid, ws in list(self._connections.items())
             if self._user_tenants.get(uid) == tenant_id
         ]
-        await self._send_many(targets, data)
-
-    async def broadcast_to_all(
-        self, event_type: str, payload: dict[str, Any]
-    ) -> None:
-        """Every connected user, across every tenant. Reserved for genuinely
-        platform-wide events (e.g. a master_admin announcement) — no
-        tenant-scoped event (kill switch, SLA, comments, ...) should call
-        this; use broadcast_to_tenant/broadcast_to_team/broadcast_to_admins.
-        """
-        data = self._envelope(event_type, payload)
-        targets = list(self._connections.items())
         await self._send_many(targets, data)
 
 

@@ -11,7 +11,6 @@ GET /dashboard/manager/confidence
 GET /dashboard/manager/team
 GET /dashboard/manager/abstention
 GET /dashboard/manager/collisions
-GET /dashboard/manager/cost-savings
 GET /dashboard/manager/approvals
 GET /dashboard/manager/ticket-tree
 GET /dashboard/manager/ticket-tree/tickets
@@ -498,46 +497,6 @@ async def get_manager_collisions(
     ]
 
     return {"collision_events": collision_events}
-
-
-# ── Manager — Cost savings ────────────────────────────────────────────────────
-
-@router.get("/manager/cost-savings")
-async def get_manager_cost_savings(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[dict, Depends(require_manager)],
-    date_from: str | None = Query(None),
-    date_to:   str | None = Query(None),
-) -> dict:
-    tenant_id = current_user["tenant_id"]
-    params: dict = {"tenant_id": tenant_id}
-    clauses = ["tenant_id = :tenant_id", "abstained = 0"]
-    clauses += _date_range_clauses("created_at", date_from, date_to, params)
-
-    # Assume: each zero-touch resolution saves 30 min at $50/hr = $25
-    count_row = await db.execute(sa_text(
-        f"SELECT COUNT(*) FROM audit_log WHERE {' AND '.join(clauses)}"
-    ), params)
-    zero_touch = count_row.scalar() or 0
-
-    # Weekly trend (last 8 weeks)
-    trend_rows = await db.execute(sa_text(
-        "SELECT strftime('%Y-%W', created_at) as week, "
-        "SUM(CASE WHEN abstained = 0 THEN 1 ELSE 0 END) as zero_touch "
-        "FROM audit_log WHERE tenant_id = :tenant_id GROUP BY week ORDER BY week DESC LIMIT 8"
-    ), {"tenant_id": tenant_id})
-    trend_data = [
-        {"date": r["week"], "zero_touch": r["zero_touch"] or 0}
-        for r in trend_rows.mappings()
-    ]
-    trend_data.reverse()
-
-    return {
-        "hours_saved":         round(zero_touch * 0.5, 1),
-        "cost_reduction":      round(zero_touch * 25, 2),
-        "zero_touch_per_week": round(zero_touch / max(len(trend_data), 1), 1),
-        "trend_data":          trend_data,
-    }
 
 
 # ── Manager — Approval queue ──────────────────────────────────────────────────

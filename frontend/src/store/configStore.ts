@@ -16,6 +16,7 @@ interface ConfigState {
   setKillSwitch:       (active: boolean) => void
   setAccentColor:      (hex: string) => void
   setCompanyBranding:  (name: string, logo: string, accent: string) => void
+  clearBranding:       () => void
   setTheme:            (theme: Theme) => void
   initTheme:           () => void
   setSetupComplete:    (v: boolean) => void
@@ -64,6 +65,16 @@ export const useConfigStore = create<ConfigState>((set) => ({
       companyLogo: logo,
       ...(accent ? { accentColor: accent } : {}),
     })
+  },
+
+  // Forces the generic AURA identity — no tenant logo/name/accent. Used for
+  // master_admin, which has no tenant_id and should never show client branding.
+  clearBranding: () => {
+    applyAccent(DEFAULT_ACCENT)
+    localStorage.setItem('companyName', '')
+    localStorage.setItem('companyLogo', '')
+    localStorage.setItem('accentColor', DEFAULT_ACCENT)
+    set({ companyName: '', companyLogo: '', accentColor: DEFAULT_ACCENT })
   },
 
   setTheme: (theme) => {

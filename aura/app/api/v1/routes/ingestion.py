@@ -67,6 +67,7 @@ async def trigger_ingestion(
     async def _background(run_id: str) -> None:
         # Open a dedicated session — the request session closes after trigger returns
         from app.db.sqlite import _get_session_factory
+        from app.services.notification_bus import notification_bus
         session_factory = _get_session_factory()
         try:
             async with session_factory() as bg_db:
@@ -79,6 +80,8 @@ async def trigger_ingestion(
                         status=event["status"],
                         pct=event["progress_pct"],
                     )
+                    event_type = "INGESTION_COMPLETE" if event["status"] in ("completed", "failed") else "INGESTION_PROGRESS"
+                    await notification_bus.broadcast_to_tenant(tenant_id, event_type, event)
         except Exception as exc:
             log.error("ingestion.api_trigger_failed", tenant_id=tenant_id, run_id=run_id, error=str(exc))
         finally:

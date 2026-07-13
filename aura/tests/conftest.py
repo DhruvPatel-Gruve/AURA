@@ -203,16 +203,6 @@ def mock_get_session(db_session):
 
 
 @pytest.fixture
-def mock_notification_bus():
-    """Replace broadcast calls with no-ops so node tests don't need WS connections."""
-    with patch(
-        "app.services.notification_bus.notification_bus.broadcast_to_all",
-        new=AsyncMock(return_value=None),
-    ) as m:
-        yield m
-
-
-@pytest.fixture
 def sample_tenant_id() -> str:
     """Constant tenant_id already seeded (with its tenants + platform_config
     rows) by the db_session fixture itself — use this wherever a test needs

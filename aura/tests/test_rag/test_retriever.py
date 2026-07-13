@@ -72,7 +72,7 @@ async def test_probe_top_score_survives_qdrant_error():
     with patch("app.rag.retriever.get_qdrant_client", return_value=client), \
          patch("app.rag.retriever.GeminiEmbedder", return_value=embedder):
         retriever = HybridRetriever()
-        top_score, query_vector = await retriever.probe_top_score(query_text="vpn broken")
+        top_score, query_vector = await retriever.probe_top_score(query_text="vpn broken", collection="resolved_tickets")
 
     assert top_score == 0.0
     assert len(query_vector) == 768

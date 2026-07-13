@@ -55,7 +55,6 @@ class Settings(BaseSettings):
     # ── Qdrant ────────────────────────────────────────────────────────────────
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str = ""
-    qdrant_resolved_collection: str = "resolved_tickets"
     qdrant_vector_size: int = 768
 
     # ── SQLite ────────────────────────────────────────────────────────────────

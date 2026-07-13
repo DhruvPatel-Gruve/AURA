@@ -3,6 +3,7 @@ import { CheckCircle2, XCircle, Loader2, Database, SkipForward } from 'lucide-re
 import { ingestionApi } from '@/api/ingestion.api'
 import { DocumentUploadCard } from '@/components/knowledge/DocumentUploadCard'
 import { ITSM_PROVIDER_SHORT_LABELS, type ItsmProvider } from '@/utils/constants'
+import { useIngestionProgressStore } from '@/store/ingestionProgressStore'
 
 export interface Step6Data {
   ingestion_triggered: boolean
@@ -28,11 +29,13 @@ export default function Step6_KnowledgeIngestion({ initialData, provider = 'jira
     return 'idle'
   }
 
-  const [phase,        setPhase]        = useState<Phase>(initPhase)
-  const [runId,        setRunId]        = useState<string | undefined>(initialData?.run_id)
-  const [progress,     setProgress]     = useState<number>(0)
-  const [errMsg,       setErrMsg]       = useState<string | null>(null)
+  const [phase,          setPhase]          = useState<Phase>(initPhase)
+  const [runId,          setRunId]          = useState<string | undefined>(initialData?.run_id)
+  const [progress,       setProgress]       = useState<number>(0)
+  const [ticketProgress, setTicketProgress] = useState<{ processed: number; total: number } | null>(null)
+  const [errMsg,         setErrMsg]         = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const latestIngestionEvent = useIngestionProgressStore((s) => s.latest)
 
   const buildData = useCallback((p: Phase, rid?: string): Step6Data => ({
     ingestion_triggered: p !== 'idle',
@@ -55,6 +58,32 @@ export default function Step6_KnowledgeIngestion({ initialData, provider = 'jira
     else notify(phase, runId)
     return () => stopPolling()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Live per-ticket counter — driven by the INGESTION_PROGRESS/COMPLETE
+  // WebSocket events pushed while this run is active. Polling (below) stays
+  // as the source of truth for phase transitions in case a message is
+  // missed; this just makes the "X/Y tickets" count update immediately.
+  useEffect(() => {
+    if (!latestIngestionEvent || phase !== 'running' || latestIngestionEvent.run_id !== runId) return
+
+    setProgress(latestIngestionEvent.progress_pct)
+    setTicketProgress({
+      processed: latestIngestionEvent.tickets_processed,
+      total: latestIngestionEvent.tickets_fetched,
+    })
+
+    if (latestIngestionEvent.status === 'completed') {
+      stopPolling()
+      setPhase('done')
+      notify('done', runId)
+    } else if (latestIngestionEvent.status === 'failed') {
+      stopPolling()
+      setPhase('error')
+      setErrMsg('Ingestion failed. You can skip and retry later from Admin → Knowledge Index.')
+      notify('error', runId)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestIngestionEvent])
 
   const stopPolling = () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
@@ -84,6 +113,7 @@ export default function Step6_KnowledgeIngestion({ initialData, provider = 'jira
     setErrMsg(null)
     setPhase('running')
     setProgress(0)
+    setTicketProgress(null)
     try {
       const res = await ingestionApi.trigger()
       setRunId(res.run_id)
@@ -156,7 +186,9 @@ export default function Step6_KnowledgeIngestion({ initialData, provider = 'jira
                 />
               </div>
               <p className="text-xs font-mono text-faint mt-1.5 text-center tabular-nums">
-                {progress > 0 ? `${progress}%` : 'Starting…'}
+                {ticketProgress
+                  ? `${ticketProgress.processed} / ${ticketProgress.total} tickets processed`
+                  : progress > 0 ? `${progress}%` : 'Starting…'}
               </p>
             </div>
             <button type="button" onClick={handleSkip} className="btn-ghost text-xs">

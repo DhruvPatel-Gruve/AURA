@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   Target, TrendingUp, AlertCircle, Zap,
-  UserCheck, Users, DollarSign, Network, ChevronRight, Activity,
+  UserCheck, Users, Network, ChevronRight, Activity,
 } from 'lucide-react'
 import {
   LineChart, Line, ResponsiveContainer, Tooltip,
@@ -102,11 +102,6 @@ export default function ManagerDashboard() {
     queryKey: ['manager', 'collisions', 'overview', rangeDays],
     queryFn:  () => dashboardApi.getManagerCollisions({ date_from: dateFrom }),
   })
-  const { data: costSavings } = useQuery({
-    queryKey: ['manager', 'cost-savings', 'overview', rangeDays],
-    queryFn:  () => dashboardApi.getManagerCostSavings({ date_from: dateFrom }),
-  })
-
   // The Ticket Universe panel — same aggregation the Ticket Tree page uses,
   // rendered flat here as per-category health rows that deep-link into it.
   const { data: tree } = useQuery({
@@ -346,15 +341,6 @@ export default function ManagerDashboard() {
                 icon={Users}
                 className="transition-colors hover:border-faint/40"
                 delta={collisions ? { label: 'concurrent claims', positive: activeCollisionCount === 0 } : undefined}
-              />
-            </button>
-            <button onClick={() => navigate('/manager/savings')} className="text-left">
-              <StatCard
-                label="Cost Savings"
-                value={costSavings ? `$${costSavings.cost_reduction.toLocaleString()}` : '—'}
-                icon={DollarSign}
-                className="transition-colors hover:border-faint/40"
-                delta={costSavings ? { label: `${costSavings.hours_saved}h saved`, positive: true } : undefined}
               />
             </button>
           </div>

@@ -1,7 +1,7 @@
 """Audit logger — immutable append-only decision log for every agent pipeline run.
 
 The audit_log table is the single source of truth for:
-  - Manager analytics dashboards (resolution rate, confidence, abstention, cost savings)
+  - Manager analytics dashboards (resolution rate, confidence, abstention)
   - Admin audit log page (filterable, CSV-exportable)
   - Per-ticket AuditStepTimeline in the technician Ticket Detail view
 
@@ -160,40 +160,6 @@ async def export_csv(
 
     buf.seek(0)
     return buf
-
-
-# ── Dashboard aggregates ──────────────────────────────────────────────────────
-
-async def get_resolution_stats(
-    db: AsyncSession,
-    tenant_id: str,
-    date_from: datetime | None = None,
-    date_to: datetime | None = None,
-) -> dict[str, Any]:
-    """Return aggregate resolution metrics for the Manager dashboard."""
-    where, params = _build_filters(tenant_id, date_from=date_from, date_to=date_to)
-
-    result = await db.execute(
-        sa_text(
-            f"SELECT "
-            f"  COUNT(*) as total,"
-            f"  SUM(CASE WHEN action_taken = 'comment_posted' THEN 1 ELSE 0 END) as auto_posted,"
-            f"  SUM(CASE WHEN abstained = 1 THEN 1 ELSE 0 END) as abstained,"
-            f"  AVG(CASE WHEN confidence_score IS NOT NULL THEN confidence_score END) as avg_confidence"
-            f" FROM audit_log{where}"
-        ),
-        params,
-    )
-    row = result.mappings().first() or {}
-    total = row.get("total") or 0
-    auto_posted = row.get("auto_posted") or 0
-    return {
-        "total": total,
-        "auto_posted": auto_posted,
-        "auto_pct": round(auto_posted / total * 100, 1) if total else 0.0,
-        "abstained": row.get("abstained") or 0,
-        "avg_confidence": round(float(row.get("avg_confidence") or 0), 3),
-    }
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
