@@ -223,6 +223,11 @@ a Python/Node toolchain, and a Google Gemini API key (used solely for
 embeddings). ITSM credentials are entered later, per tenant, through the
 Setup Wizard — see [step 5](#running-the-app) below.
 
+**Default master admin login (for testing):** `admin@aura.local` /
+`changeme123` — seeded automatically on first boot, overridable via
+`DEFAULT_ADMIN_EMAIL`/`DEFAULT_ADMIN_PASSWORD` in `aura/.env`. Change it after
+first login; a startup guard blocks this default when `APP_ENV=production`.
+
 ### Prerequisites
 
 - Python 3.12+ and pip
