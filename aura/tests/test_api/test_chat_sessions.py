@@ -17,7 +17,15 @@ from sqlalchemy import text as sa_text
 
 from app.core.security import require_any_auth
 from app.db.sqlite import get_db
+from app.services.ai_config_service import ResolvedAIConfig
 from tests.conftest import SAMPLE_TENANT_ID as TENANT
+
+_CONFIGURED_AI = ResolvedAIConfig(
+    tenant_id=TENANT,
+    embedding_provider="gemini", embedding_api_key="k", embedding_base_url=None,
+    embedding_model="models/gemini-embedding-2", embedding_vector_size=768,
+    llm_base_url="http://localhost:11434/v1", llm_model="qwen3:8b", llm_api_key=None,
+)
 
 _FAKE_USER = {
     "user_id": "test-user",
@@ -36,6 +44,18 @@ def _lifespan_patches():
         patch("app.db.qdrant_client.close_qdrant", new=AsyncMock()),
         patch("scheduler.scheduler.start", new=AsyncMock()),
         patch("scheduler.scheduler.stop", new=AsyncMock()),
+    ]
+
+
+def _ai_config_patches(mock_client):
+    """chat.py now resolves AI config + LLM client per-tenant via
+    ai_config_service instead of reading global Settings/AsyncOpenAI
+    directly. HybridRetriever.__init__ also resolves an embedder via
+    get_embedder(tenant_id) even though `retrieve` itself is mocked below."""
+    return [
+        patch("app.api.v1.routes.chat.get_ai_config", return_value=_CONFIGURED_AI),
+        patch("app.api.v1.routes.chat.get_llm_client", return_value=mock_client),
+        patch("app.rag.retriever.get_embedder", return_value=MagicMock()),
     ]
 
 
@@ -80,7 +100,8 @@ async def test_consecutive_messages_share_a_session_and_prior_turn_is_in_prompt(
     with ExitStack() as stack:
         for p in _lifespan_patches():
             stack.enter_context(p)
-        stack.enter_context(patch("app.api.v1.routes.chat.AsyncOpenAI", return_value=mock_client))
+        for p in _ai_config_patches(mock_client):
+            stack.enter_context(p)
         stack.enter_context(patch.object(
             __import__("app.rag.retriever", fromlist=["HybridRetriever"]).HybridRetriever,
             "retrieve", new=AsyncMock(return_value=[]),
@@ -119,7 +140,8 @@ async def test_close_starts_a_fresh_session_with_no_memory(db_session):
     with ExitStack() as stack:
         for p in _lifespan_patches():
             stack.enter_context(p)
-        stack.enter_context(patch("app.api.v1.routes.chat.AsyncOpenAI", return_value=mock_client))
+        for p in _ai_config_patches(mock_client):
+            stack.enter_context(p)
         stack.enter_context(patch.object(
             __import__("app.rag.retriever", fromlist=["HybridRetriever"]).HybridRetriever,
             "retrieve", new=AsyncMock(return_value=[]),
@@ -162,7 +184,8 @@ async def test_history_after_close_is_empty_with_null_session(db_session):
     with ExitStack() as stack:
         for p in _lifespan_patches():
             stack.enter_context(p)
-        stack.enter_context(patch("app.api.v1.routes.chat.AsyncOpenAI", return_value=mock_client))
+        for p in _ai_config_patches(mock_client):
+            stack.enter_context(p)
         stack.enter_context(patch.object(
             __import__("app.rag.retriever", fromlist=["HybridRetriever"]).HybridRetriever,
             "retrieve", new=AsyncMock(return_value=[]),

@@ -4,6 +4,15 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.services.ai_config_service import ResolvedAIConfig
+
+_CONFIGURED_AI = ResolvedAIConfig(
+    tenant_id="test-tenant-1",
+    embedding_provider="gemini", embedding_api_key="k", embedding_base_url=None,
+    embedding_model="models/gemini-embedding-2", embedding_vector_size=768,
+    llm_base_url="http://localhost:11434/v1", llm_model="qwen3:8b", llm_api_key=None,
+)
+
 
 async def _seed_category(db, name="Network", team_id="net-team", tenant_id="test-tenant-1"):
     from sqlalchemy import text as sa_text
@@ -48,7 +57,8 @@ async def test_llm_success_classifies_correctly(base_state, mock_get_session):
     mock_client.chat.completions = MagicMock()
     mock_client.chat.completions.create = AsyncMock(return_value=llm_resp)
 
-    with patch("app.agents.nodes.triage_node.AsyncOpenAI", return_value=mock_client):
+    with patch("app.agents.nodes.triage_node.get_ai_config", return_value=_CONFIGURED_AI), \
+         patch("app.agents.nodes.triage_node.get_llm_client", return_value=mock_client):
         from app.agents.nodes.triage_node import triage_node
         result = await triage_node(base_state)
 
@@ -66,7 +76,8 @@ async def test_llm_failure_falls_back_to_other(base_state, mock_get_session):
     mock_client.chat.completions = MagicMock()
     mock_client.chat.completions.create = AsyncMock(side_effect=Exception("Connection refused"))
 
-    with patch("app.agents.nodes.triage_node.AsyncOpenAI", return_value=mock_client):
+    with patch("app.agents.nodes.triage_node.get_ai_config", return_value=_CONFIGURED_AI), \
+         patch("app.agents.nodes.triage_node.get_llm_client", return_value=mock_client):
         from app.agents.nodes.triage_node import triage_node
         result = await triage_node(base_state)
 
@@ -85,7 +96,8 @@ async def test_markdown_fence_stripped(base_state, mock_get_session):
     mock_client.chat.completions = MagicMock()
     mock_client.chat.completions.create = AsyncMock(return_value=llm_resp)
 
-    with patch("app.agents.nodes.triage_node.AsyncOpenAI", return_value=mock_client):
+    with patch("app.agents.nodes.triage_node.get_ai_config", return_value=_CONFIGURED_AI), \
+         patch("app.agents.nodes.triage_node.get_llm_client", return_value=mock_client):
         from app.agents.nodes.triage_node import triage_node
         result = await triage_node(base_state)
 

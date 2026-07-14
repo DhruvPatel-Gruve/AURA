@@ -8,6 +8,7 @@ const STEP_LABELS = [
   'Provider',
   'Branding',
   'Connection',
+  'AI Config',
   'Categories',
   'Teams',
   'Agent Config',

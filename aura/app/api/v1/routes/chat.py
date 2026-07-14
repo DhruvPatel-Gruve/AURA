@@ -20,7 +20,6 @@ from typing import Annotated
 import asyncio
 
 from fastapi import APIRouter, Depends, Request
-from openai import AsyncOpenAI
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +37,12 @@ from app.models.api_schemas import (
     ChatResponse,
 )
 from app.rag.retriever import HybridRetriever
+from app.services.ai_config_service import get_ai_config, get_llm_client
+
+_AI_NOT_CONFIGURED_REPLY = (
+    "AI assistant is not configured for your organization yet. "
+    "Please contact your administrator."
+)
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -74,70 +79,75 @@ async def send_message(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[dict, Depends(require_any_auth)],
 ) -> ChatResponse:
-    settings = get_settings()
     tenant_id = current_user["tenant_id"]
     user_id = current_user["user_id"]
     now = datetime.now(timezone.utc)
 
     session_id = await _get_or_create_active_session(db, tenant_id, user_id)
 
-    # ── Retrieve context ──────────────────────────────────────────────────────
-    collection = await ensure_tenant_collection(tenant_id)
-    retriever = HybridRetriever()
-    chunks = await retriever.retrieve(query_text=body.message, top_k=4, collection=collection)
+    ai_config = get_ai_config(tenant_id)
+    if not (ai_config.embeddings_configured and ai_config.llm_configured):
+        # Gracefully abstain rather than crash — mirrors the agent pipeline's
+        # ai_config_gate_node for the same "no fallback" rule. Still persist
+        # both turns so chat history stays coherent for whenever AI config
+        # is completed.
+        reply = _AI_NOT_CONFIGURED_REPLY
+        citations: list[str] = []
+        log.warning("chat.ai_not_configured", tenant_id=tenant_id)
+    else:
+        # ── Retrieve context ──────────────────────────────────────────────────
+        collection = await ensure_tenant_collection(tenant_id)
+        retriever = HybridRetriever(tenant_id)
+        chunks = await retriever.retrieve(query_text=body.message, top_k=4, collection=collection)
 
-    context_parts = []
-    total_chars = 0
-    for chunk in chunks:
-        block = f"[{chunk['ticket_id']}]: {chunk['content']}"
-        if total_chars + len(block) > _MAX_CTX_CHARS:
-            break
-        context_parts.append(block)
-        total_chars += len(block)
-    formatted_context = "\n\n".join(context_parts)
-    citations = list({c["ticket_id"] for c in chunks[:len(context_parts)]})
+        context_parts = []
+        total_chars = 0
+        for chunk in chunks:
+            block = f"[{chunk['ticket_id']}]: {chunk['content']}"
+            if total_chars + len(block) > _MAX_CTX_CHARS:
+                break
+            context_parts.append(block)
+            total_chars += len(block)
+        formatted_context = "\n\n".join(context_parts)
+        citations = list({c["ticket_id"] for c in chunks[:len(context_parts)]})
 
-    # ── Load recent chat history — scoped to this conversation only ─────────
-    hist_result = await db.execute(
-        sa_text(
-            "SELECT role, content FROM chat_messages WHERE tenant_id = :tenant AND session_id = :sid "
-            "ORDER BY timestamp DESC LIMIT :lim"
-        ),
-        {"tenant": tenant_id, "sid": session_id, "lim": _MAX_HISTORY},
-    )
-    history_rows = list(reversed(hist_result.mappings().all()))
-    history_messages = [{"role": r["role"], "content": r["content"]} for r in history_rows]
-
-    # ── Call LLM ─────────────────────────────────────────────────────────────
-    system_prompt = (
-        "You are AURA, an IT support assistant. "
-        "Answer the employee's question using ONLY the provided context from resolved tickets. "
-        "If the context doesn't contain an answer, say so honestly — do not make up steps.\n\n"
-        f"Context:\n{formatted_context or '(no relevant context found)'}"
-    )
-    messages = [{"role": "system", "content": system_prompt}] + history_messages + [
-        {"role": "user", "content": body.message}
-    ]
-
-    reply = "I'm sorry, I couldn't find a relevant answer in the knowledge base. Please contact your IT helpdesk directly."
-    try:
-        client = AsyncOpenAI(
-            base_url=settings.ollama_base_url,
-            api_key="ollama",
-            timeout=settings.ollama_timeout_seconds,
-        )
-        response = await asyncio.wait_for(
-            client.chat.completions.create(
-                model=settings.ollama_model,
-                messages=messages,
-                max_tokens=512,
-                temperature=0.3,
+        # ── Load recent chat history — scoped to this conversation only ─────
+        hist_result = await db.execute(
+            sa_text(
+                "SELECT role, content FROM chat_messages WHERE tenant_id = :tenant AND session_id = :sid "
+                "ORDER BY timestamp DESC LIMIT :lim"
             ),
-            timeout=settings.ollama_timeout_seconds,
+            {"tenant": tenant_id, "sid": session_id, "lim": _MAX_HISTORY},
         )
-        reply = response.choices[0].message.content or reply
-    except Exception as exc:
-        log.warning("chat.llm_call_failed", error=str(exc))
+        history_rows = list(reversed(hist_result.mappings().all()))
+        history_messages = [{"role": r["role"], "content": r["content"]} for r in history_rows]
+
+        # ── Call LLM ─────────────────────────────────────────────────────────
+        system_prompt = (
+            "You are AURA, an IT support assistant. "
+            "Answer the employee's question using ONLY the provided context from resolved tickets. "
+            "If the context doesn't contain an answer, say so honestly — do not make up steps.\n\n"
+            f"Context:\n{formatted_context or '(no relevant context found)'}"
+        )
+        messages = [{"role": "system", "content": system_prompt}] + history_messages + [
+            {"role": "user", "content": body.message}
+        ]
+
+        reply = "I'm sorry, I couldn't find a relevant answer in the knowledge base. Please contact your IT helpdesk directly."
+        try:
+            client = get_llm_client(tenant_id)
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model=ai_config.llm_model,
+                    messages=messages,
+                    max_tokens=512,
+                    temperature=0.3,
+                ),
+                timeout=get_settings().ollama_timeout_seconds,
+            )
+            reply = response.choices[0].message.content or reply
+        except Exception as exc:
+            log.warning("chat.llm_call_failed", error=str(exc))
 
     # ── Persist both turns ────────────────────────────────────────────────────
     for role, content in [("user", body.message), ("assistant", reply)]:

@@ -94,6 +94,14 @@ CREATE TABLE IF NOT EXISTS platform_config (
     zen_subdomain                 TEXT,
     zen_api_email                 TEXT,
     zen_api_token_encrypted       TEXT,
+    embedding_provider            TEXT CHECK (embedding_provider IN ('gemini', 'openai_compatible')),
+    embedding_api_key_encrypted   TEXT,
+    embedding_base_url            TEXT,
+    embedding_model                TEXT,
+    embedding_vector_size          INTEGER,
+    llm_base_url                   TEXT,
+    llm_model                      TEXT,
+    llm_api_key_encrypted          TEXT,
     updated_at                   TEXT NOT NULL
 );
 

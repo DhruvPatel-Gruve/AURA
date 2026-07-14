@@ -56,15 +56,15 @@ function Row({ label, value, mono }: { label: string; value: string | number | u
 export default function Step7_ReviewLaunch({ savedSteps, onChange }: Props) {
   const data = savedSteps as AllStepData & Record<string, unknown>
   // Step numbering: 1=Welcome, 2=Provider choice, 3=Branding (not shown here), 4=Connection (Jira/Zendesk),
-  // 5=Categories, 6=Teams, 7=AgentConfig, 8=Knowledge, 9=Review (this step)
+  // 5=Model & AI Config (not shown here), 6=Categories, 7=Teams, 8=AgentConfig, 9=Knowledge, 10=Review (this step)
   const provider = ((data[2] as Partial<Step2ProviderData> | undefined)?.itsm_provider ?? 'jira')
   const isZendesk = provider === 'zendesk'
-  const s2 = (data[4] ?? data.step2 ?? {}) as Partial<Step2Data>              // JSM connection is now step 4
-  const s2z = (data[4] ?? {}) as Partial<Step4ZendeskData>                    // Zendesk connection is now step 4
-  const s3 = (data[5] ?? data.step3 ?? {}) as Partial<Step3Data>              // Categories now step 5
-  const s4 = (data[6] ?? data.step4 ?? {}) as Partial<Step4Data>              // Teams now step 6
-  const s5 = (data[7] ?? data.step5 ?? {}) as Partial<Step5Data>              // AgentConfig now step 7
-  const s6 = (data[8] ?? data.step6 ?? {}) as Partial<Step6Data>              // Knowledge now step 8
+  const s2 = (data[4] ?? data.step2 ?? {}) as Partial<Step2Data>              // JSM connection is step 4
+  const s2z = (data[4] ?? {}) as Partial<Step4ZendeskData>                    // Zendesk connection is step 4
+  const s3 = (data[6] ?? data.step3 ?? {}) as Partial<Step3Data>              // Categories now step 6
+  const s4 = (data[7] ?? data.step4 ?? {}) as Partial<Step4Data>              // Teams now step 7
+  const s5 = (data[8] ?? data.step5 ?? {}) as Partial<Step5Data>              // AgentConfig now step 8
+  const s6 = (data[9] ?? data.step6 ?? {}) as Partial<Step6Data>              // Knowledge now step 9
 
   const notify = useCallback(() => onChange({}, true), [onChange])
   useEffect(() => { notify() }, []) // eslint-disable-line react-hooks/exhaustive-deps

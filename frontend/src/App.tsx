@@ -25,6 +25,7 @@ import AdminDashboard    from '@/pages/admin/AdminDashboard'
 import UserManagement    from '@/pages/admin/UserManagement'
 import CategoryManagement from '@/pages/admin/CategoryManagement'
 import AgentConfig       from '@/pages/admin/AgentConfig'
+import Integrations      from '@/pages/admin/Integrations'
 import KillSwitch        from '@/pages/admin/KillSwitch'
 import RollbackHistory   from '@/pages/admin/RollbackHistory'
 import AuditLog          from '@/pages/admin/AuditLog'
@@ -171,6 +172,7 @@ function AppRoutes() {
           <Route path="/admin/users"         element={<UserManagement />} />
           <Route path="/admin/categories"    element={<CategoryManagement />} />
           <Route path="/admin/config"        element={<AgentConfig />} />
+          <Route path="/admin/integrations"  element={<Integrations />} />
           <Route path="/admin/kill-switch"   element={<KillSwitch />} />
           <Route path="/admin/rollback"      element={<RollbackHistory />} />
           <Route path="/admin/audit-log"     element={<AuditLog />} />

@@ -152,11 +152,14 @@ def mock_embedder():
     BM25 fitting and sparse vectors are still real (pure Python).
     """
     from app.rag.embedder import GeminiEmbedder
+    from app.rag.embedder_base import BM25SparseEncoder
 
     embedder = GeminiEmbedder.__new__(GeminiEmbedder)
+    embedder._api_key = "test-gemini-key"
     embedder._model = "models/gemini-embedding-2"
+    embedder._vector_size = 768
     embedder._batch_size = 100
-    embedder._corpus = None
+    embedder._bm25 = BM25SparseEncoder()
 
     async def _stub_embed_batch(texts: list[str]) -> list[list[float]]:
         return [[0.1] * 768 for _ in texts]

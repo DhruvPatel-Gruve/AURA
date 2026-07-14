@@ -69,11 +69,25 @@ async def ensure_tenant_collection(tenant_id: str) -> str:
     name. Cheap to call on every ingestion/retrieval — the in-process
     `_ensured_collections` set makes every call after the first a no-op
     with zero Qdrant round-trip.
+
+    Vector size comes from this tenant's own embedding configuration (Gemini
+    is always 768; an OpenAI-compatible provider's dimension is whatever the
+    tenant supplied and verified via the embedding test-connection route) —
+    falls back to the global Settings default only if this tenant genuinely
+    has no AI config row yet, which shouldn't happen once the AI-config gate
+    runs ahead of every real ingestion/retrieval call site.
     """
+    from app.services.ai_config_service import get_ai_config
+
     name = resolved_collection_name(tenant_id)
     if name not in _ensured_collections:
-        settings = get_settings()
-        await _ensure_collection(name, settings.qdrant_vector_size)
+        config = get_ai_config(tenant_id)
+        vector_size = (
+            config.resolved_embedding_vector_size
+            if config.embeddings_configured
+            else get_settings().qdrant_vector_size
+        )
+        await _ensure_collection(name, vector_size)
         _ensured_collections.add(name)
     return name
 

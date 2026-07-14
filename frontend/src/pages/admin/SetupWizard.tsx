@@ -4,18 +4,19 @@ import { setupApi } from '@/api/setup.api'
 import { WizardShell } from '@/components/wizard/WizardShell'
 import { useConfigStore, DEFAULT_ACCENT } from '@/store/configStore'
 
-import Step1_Welcome            from './wizard-steps/Step1_Welcome'
-import Step2_ChooseProvider     from './wizard-steps/Step2_ChooseProvider'
-import Step3_Branding           from './wizard-steps/Step2_Branding'
-import Step4_JSMConnection      from './wizard-steps/Step2_JSMConnection'
-import Step4_ZendeskConnection  from './wizard-steps/Step4_ZendeskConnection'
-import Step5_CategoriesSLA      from './wizard-steps/Step3_CategoriesSLA'
-import Step6_TeamsUsers         from './wizard-steps/Step4_TeamsUsers'
-import Step7_AgentConfig        from './wizard-steps/Step5_AgentConfig'
-import Step8_KnowledgeIngestion from './wizard-steps/Step6_KnowledgeIngestion'
-import Step9_ReviewLaunch       from './wizard-steps/Step7_ReviewLaunch'
+import Step1_Welcome             from './wizard-steps/Step1_Welcome'
+import Step2_ChooseProvider      from './wizard-steps/Step2_ChooseProvider'
+import Step3_Branding            from './wizard-steps/Step2_Branding'
+import Step4_JSMConnection       from './wizard-steps/Step2_JSMConnection'
+import Step4_ZendeskConnection   from './wizard-steps/Step4_ZendeskConnection'
+import Step5_ModelAIConfig       from './wizard-steps/Step5_ModelAIConfig'
+import Step6_CategoriesSLA       from './wizard-steps/Step3_CategoriesSLA'
+import Step7_TeamsUsers          from './wizard-steps/Step4_TeamsUsers'
+import Step8_AgentConfig         from './wizard-steps/Step5_AgentConfig'
+import Step9_KnowledgeIngestion  from './wizard-steps/Step6_KnowledgeIngestion'
+import Step10_ReviewLaunch       from './wizard-steps/Step7_ReviewLaunch'
 
-const TOTAL_STEPS = 9
+const TOTAL_STEPS = 10
 
 interface Props {
   onLaunch?: () => void
@@ -156,37 +157,44 @@ export default function SetupWizard({ onLaunch }: Props) {
         ))
       )}
       {currentStep === 5 && (
-        <Step5_CategoriesSLA
+        <Step5_ModelAIConfig
           key={stepKey}
-          initialData={stepData[5] as Parameters<typeof Step5_CategoriesSLA>[0]['initialData']}
+          initialData={stepData[5] as Parameters<typeof Step5_ModelAIConfig>[0]['initialData']}
           onChange={handleChange}
         />
       )}
       {currentStep === 6 && (
-        <Step6_TeamsUsers
+        <Step6_CategoriesSLA
           key={stepKey}
-          initialData={stepData[6] as Parameters<typeof Step6_TeamsUsers>[0]['initialData']}
+          initialData={stepData[6] as Parameters<typeof Step6_CategoriesSLA>[0]['initialData']}
           onChange={handleChange}
         />
       )}
       {currentStep === 7 && (
-        <Step7_AgentConfig
+        <Step7_TeamsUsers
           key={stepKey}
-          provider={provider}
-          initialData={stepData[7] as Parameters<typeof Step7_AgentConfig>[0]['initialData']}
+          initialData={stepData[7] as Parameters<typeof Step7_TeamsUsers>[0]['initialData']}
           onChange={handleChange}
         />
       )}
       {currentStep === 8 && (
-        <Step8_KnowledgeIngestion
+        <Step8_AgentConfig
           key={stepKey}
           provider={provider}
-          initialData={stepData[8] as Parameters<typeof Step8_KnowledgeIngestion>[0]['initialData']}
+          initialData={stepData[8] as Parameters<typeof Step8_AgentConfig>[0]['initialData']}
           onChange={handleChange}
         />
       )}
       {currentStep === 9 && (
-        <Step9_ReviewLaunch
+        <Step9_KnowledgeIngestion
+          key={stepKey}
+          provider={provider}
+          initialData={stepData[9] as Parameters<typeof Step9_KnowledgeIngestion>[0]['initialData']}
+          onChange={handleChange}
+        />
+      )}
+      {currentStep === 10 && (
+        <Step10_ReviewLaunch
           key={stepKey}
           savedSteps={stepData}
           onChange={handleChange}

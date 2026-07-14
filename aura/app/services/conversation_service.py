@@ -18,7 +18,6 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
-from openai import AsyncOpenAI
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +29,7 @@ from app.db.qdrant_client import ensure_tenant_collection
 from app.models.jsm import JSMComment, JSMTicket
 from app.rag.retriever import HybridRetriever
 from app.services import kill_switch, transition_service
+from app.services.ai_config_service import ResolvedAIConfig, get_ai_config, get_llm_client
 
 log = get_logger(__name__)
 
@@ -125,6 +125,11 @@ async def check_for_replies(db: AsyncSession, tenant_id: str) -> None:
         log.info("conversation_service.skipped", tenant_id=tenant_id, reason="kill_switch_off")
         return
 
+    ai_config = get_ai_config(tenant_id)
+    if not (ai_config.embeddings_configured and ai_config.llm_configured):
+        log.info("conversation_service.skipped", tenant_id=tenant_id, reason="ai_not_configured")
+        return
+
     rows = (await db.execute(
         sa_text(
             "SELECT ticket_id, reporter_account_id, last_aura_comment_at, turn_count "
@@ -201,8 +206,17 @@ async def _run_conversation_turn(
     reply: JSMComment,
     reporter_account_id: str | None,
 ) -> None:
-    settings = get_settings()
-    confirmed = await _classify_confirmation(reply.body, settings)
+    ai_config = get_ai_config(tenant_id)
+    if not (ai_config.embeddings_configured and ai_config.llm_configured):
+        # Defensive — check_for_replies() already gates on this before calling
+        # us, but this function is called directly in tests and could be
+        # called directly by future code, so don't rely solely on the caller.
+        # Leave the conversation active/untouched: no close, no comment, since
+        # neither would reflect a real resolution.
+        log.warning("conversation_service.turn_skipped", ticket_id=ticket.ticket_id, reason="ai_not_configured")
+        return
+
+    confirmed = await _classify_confirmation(reply.body, tenant_id, ai_config)
 
     if confirmed:
         await _close_conversation(db, tenant_id, ticket.ticket_id, closing_comment=None)
@@ -211,7 +225,7 @@ async def _run_conversation_turn(
     # Not a confirmation — generate a follow-up reply using the same
     # confidence-gate decision as the initial resolution.
     collection = await ensure_tenant_collection(tenant_id)
-    retriever = HybridRetriever()
+    retriever = HybridRetriever(tenant_id)
     query_text = f"{ticket.summary}\n{reply.body}"
     chunks = await retriever.retrieve(query_text=query_text, top_k=_TOP_K, collection=collection)
 
@@ -224,7 +238,7 @@ async def _run_conversation_turn(
         formatted_comment = f"**AURA** _(Confidence: 0%)_\n\n{solution}"
     else:
         formatted_comment, confidence, citations = await _generate_reply(
-            settings, ticket, reply, chunks
+            tenant_id, ai_config, ticket, reply, chunks
         )
 
     category_row = (await db.execute(
@@ -284,16 +298,12 @@ async def _close_conversation(
 
 # ── Internal: LLM calls ───────────────────────────────────────────────────────
 
-async def _classify_confirmation(reply_text: str, settings) -> bool:
+async def _classify_confirmation(reply_text: str, tenant_id: str, ai_config: ResolvedAIConfig) -> bool:
     try:
-        client = AsyncOpenAI(
-            base_url=settings.ollama_base_url,
-            api_key="ollama",
-            timeout=settings.ollama_timeout_seconds,
-        )
+        client = get_llm_client(tenant_id)
         response = await asyncio.wait_for(
             client.chat.completions.create(
-                model=settings.ollama_model,
+                model=ai_config.llm_model,
                 messages=[
                     {"role": "system", "content": _CONFIRMATION_SYSTEM_PROMPT},
                     {"role": "user", "content": reply_text[:1000]},
@@ -301,7 +311,7 @@ async def _classify_confirmation(reply_text: str, settings) -> bool:
                 max_tokens=32,
                 temperature=0,
             ),
-            timeout=settings.ollama_timeout_seconds,
+            timeout=get_settings().ollama_timeout_seconds,
         )
         raw = (response.choices[0].message.content or "{}").strip()
         if raw.startswith("```"):
@@ -312,7 +322,9 @@ async def _classify_confirmation(reply_text: str, settings) -> bool:
         return False  # safe default — keep the conversation going rather than closing incorrectly
 
 
-async def _generate_reply(settings, ticket: JSMTicket, reply: JSMComment, chunks: list) -> tuple[str, float, list[str]]:
+async def _generate_reply(
+    tenant_id: str, ai_config: ResolvedAIConfig, ticket: JSMTicket, reply: JSMComment, chunks: list,
+) -> tuple[str, float, list[str]]:
     context_parts: list[str] = []
     total_chars = 0
     for i, chunk in enumerate(chunks, 1):
@@ -336,14 +348,10 @@ async def _generate_reply(settings, ticket: JSMTicket, reply: JSMComment, chunks
     citations: list[str] = []
 
     try:
-        client = AsyncOpenAI(
-            base_url=settings.ollama_base_url,
-            api_key="ollama",
-            timeout=settings.ollama_timeout_seconds,
-        )
+        client = get_llm_client(tenant_id)
         response = await asyncio.wait_for(
             client.chat.completions.create(
-                model=settings.ollama_model,
+                model=ai_config.llm_model,
                 messages=[
                     {"role": "system", "content": _REPLY_SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
@@ -351,7 +359,7 @@ async def _generate_reply(settings, ticket: JSMTicket, reply: JSMComment, chunks
                 max_tokens=1024,
                 temperature=0.2,
             ),
-            timeout=settings.ollama_timeout_seconds,
+            timeout=get_settings().ollama_timeout_seconds,
         )
         raw = (response.choices[0].message.content or "{}").strip()
         if raw.startswith("```"):

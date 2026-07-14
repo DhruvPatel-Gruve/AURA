@@ -78,6 +78,7 @@ class AgentState(TypedDict):
     #   "held_low_confidence"   — Written to low_confidence_queue
     #   "abstained_no_kb_coverage" — Abstention; ticket flagged manually
     #   "halted_kill_switch"    — Kill switch was active
+    #   "ai_not_configured"     — Tenant hasn't configured an embedding/LLM provider
     action_taken: str | None
     jsm_comment_id: str | None      # Set on comment_posted; used for rollback
 

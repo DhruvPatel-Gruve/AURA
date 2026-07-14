@@ -37,7 +37,7 @@ async def abstention_node(state: AgentState) -> dict:
     query_text = (raw.get("summary") or "") + "\n" + (raw.get("description") or "")
 
     collection = await ensure_tenant_collection(tenant_id)
-    retriever = HybridRetriever()
+    retriever = HybridRetriever(tenant_id)
     top_score, query_embedding = await retriever.probe_top_score(
         query_text=query_text,
         collection=collection,

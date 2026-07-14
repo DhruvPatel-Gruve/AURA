@@ -67,11 +67,37 @@ class ZendeskTestResponse(BaseModel):
     error: str | None = None
 
 
+class EmbeddingTestRequest(BaseModel):
+    provider: Literal["gemini", "openai_compatible"]
+    api_key: str = Field(..., min_length=1, max_length=2000)
+    base_url: str | None = Field(None, max_length=500)   # required for openai_compatible
+    model: str | None = Field(None, max_length=200)       # required for openai_compatible; optional override for gemini
+    vector_size: int | None = Field(None, ge=1, le=8192)  # required for openai_compatible; ignored for gemini (auto=768)
+
+
+class EmbeddingTestResponse(BaseModel):
+    success: bool
+    vector_size: int = 0
+    error: str | None = None
+
+
+class LLMTestRequest(BaseModel):
+    base_url: str = Field(..., min_length=8, max_length=500)
+    model: str = Field(..., min_length=1, max_length=200)
+    api_key: str | None = Field(None, max_length=2000)   # optional — many self-hosted endpoints need none
+
+
+class LLMTestResponse(BaseModel):
+    success: bool
+    sample_reply: str | None = None
+    error: str | None = None
+
+
 _MAX_WIZARD_STEP_DATA_BYTES = 100_000
 
 
 class WizardStepSave(BaseModel):
-    step: int = Field(..., ge=1, le=9)
+    step: int = Field(..., ge=1, le=10)
     data: dict[str, Any]
 
     @field_validator("data")
@@ -299,6 +325,17 @@ class PlatformConfigResponse(BaseModel):
     accent_color: str | None = None
     company_name: str | None = None
     company_logo: str | None = None
+    jsm_base_url: str | None = None
+    jsm_project_key: str | None = None
+    zen_subdomain: str | None = None
+    embedding_provider: str | None = None
+    embedding_base_url: str | None = None
+    embedding_model: str | None = None
+    embedding_vector_size: int | None = None
+    embedding_configured: bool = False
+    llm_base_url: str | None = None
+    llm_model: str | None = None
+    llm_configured: bool = False
 
 
 class BrandingResponse(BaseModel):

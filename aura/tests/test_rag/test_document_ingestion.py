@@ -9,9 +9,17 @@ from httpx import ASGITransport, AsyncClient
 from app.core.security import require_admin
 from app.rag.chunker import DynamicChunker
 from app.rag.document_converter import convert_to_markdown
+from app.services.ai_config_service import ResolvedAIConfig
 from tests.conftest import SAMPLE_TENANT_ID as TENANT
 
 _FAKE_ADMIN = {"user_id": "test-admin", "email": "admin@aura.local", "role": "admin", "tenant_id": TENANT}
+
+_CONFIGURED_AI = ResolvedAIConfig(
+    tenant_id=TENANT,
+    embedding_provider="gemini", embedding_api_key="k", embedding_base_url=None,
+    embedding_model="models/gemini-embedding-2", embedding_vector_size=768,
+    llm_base_url="http://localhost:11434/v1", llm_model="qwen3:8b", llm_api_key=None,
+)
 
 
 # ── document_converter ────────────────────────────────────────────────────────
@@ -120,9 +128,12 @@ def test_chunk_document_no_headers_treated_as_one_section(chunker):
 def mock_embedder_for_api():
     from app.rag.embedder import GeminiEmbedder
     embedder = GeminiEmbedder.__new__(GeminiEmbedder)
+    embedder._api_key = "test-key"
     embedder._model = "models/text-embedding-004"
+    embedder._vector_size = 768
     embedder._batch_size = 100
-    embedder._corpus = None
+    from app.rag.embedder_base import BM25SparseEncoder
+    embedder._bm25 = BM25SparseEncoder()
 
     async def _stub(texts):
         return [[0.1] * 768 for _ in texts]
@@ -135,7 +146,10 @@ def _lifespan_patches(mock_qdrant):
     """Patch all lifespan hooks so create_app() starts without real infra.
 
     The lifespan imports these locally at call time, so we patch at their
-    source modules rather than on app.main.
+    source modules rather than on app.main. Also patches documents.py's
+    get_ai_config so the route's "embeddings configured?" gate passes —
+    every test in this file exercises document-conversion/chunking behavior,
+    not AI-config gating itself (that has its own dedicated test).
     """
     return [
         patch("app.db.sqlite.init_db", new=AsyncMock()),
@@ -145,6 +159,7 @@ def _lifespan_patches(mock_qdrant):
         patch("scheduler.scheduler.start", new=AsyncMock()),
         patch("scheduler.scheduler.stop", new=AsyncMock()),
         patch("app.rag.ingestion_pipeline.get_qdrant_client", return_value=mock_qdrant),
+        patch("app.api.v1.routes.documents.get_ai_config", return_value=_CONFIGURED_AI),
     ]
 
 
@@ -157,7 +172,7 @@ async def test_ingest_document_returns_201(mock_qdrant, mock_embedder_for_api):
         for p in _lifespan_patches(mock_qdrant):
             stack.enter_context(p)
         stack.enter_context(
-            patch("app.api.v1.routes.documents.GeminiEmbedder", return_value=mock_embedder_for_api)
+            patch("app.api.v1.routes.documents.get_embedder", return_value=mock_embedder_for_api)
         )
         app = create_app()
         app.dependency_overrides[require_admin] = lambda: _FAKE_ADMIN
@@ -186,7 +201,7 @@ async def test_ingest_document_doc_id_is_content_hash(mock_qdrant, mock_embedder
         for p in _lifespan_patches(mock_qdrant):
             stack.enter_context(p)
         stack.enter_context(
-            patch("app.api.v1.routes.documents.GeminiEmbedder", return_value=mock_embedder_for_api)
+            patch("app.api.v1.routes.documents.get_embedder", return_value=mock_embedder_for_api)
         )
         app = create_app()
         app.dependency_overrides[require_admin] = lambda: _FAKE_ADMIN
@@ -208,7 +223,7 @@ async def test_ingest_document_upserts_to_qdrant(mock_qdrant, mock_embedder_for_
         for p in _lifespan_patches(mock_qdrant):
             stack.enter_context(p)
         stack.enter_context(
-            patch("app.api.v1.routes.documents.GeminiEmbedder", return_value=mock_embedder_for_api)
+            patch("app.api.v1.routes.documents.get_embedder", return_value=mock_embedder_for_api)
         )
         app = create_app()
         app.dependency_overrides[require_admin] = lambda: _FAKE_ADMIN

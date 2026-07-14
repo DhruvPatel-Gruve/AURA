@@ -4,7 +4,7 @@ import {
   BarChart2, TrendingUp, Target, UserCheck,
   AlertCircle, CheckSquare,
   Inbox, MessageSquare, PlusCircle, Users2,
-  Network, Building2,
+  Network, Building2, Plug,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -46,6 +46,7 @@ export const ROLE_NAV: Record<Role, NavItem[]> = {
     { label: 'Users',          path: '/admin/users',        icon: Users           },
     { label: 'Categories',     path: '/admin/categories',   icon: Tag             },
     { label: 'Agent Config',   path: '/admin/config',       icon: Settings        },
+    { label: 'Integrations',   path: '/admin/integrations', icon: Plug            },
     { label: 'Kill Switch',    path: '/admin/kill-switch',  icon: Power           },
     { label: 'Rollback',       path: '/admin/rollback',     icon: RotateCcw       },
     { label: 'Audit Log',      path: '/admin/audit-log',    icon: FileText        },

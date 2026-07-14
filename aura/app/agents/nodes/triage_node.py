@@ -9,27 +9,28 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
-from openai import AsyncOpenAI
 from sqlalchemy import text as sa_text
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.sqlite import get_session
 from app.models.agent_state import AgentState
+from app.services.ai_config_service import get_ai_config, get_llm_client
 
 log = get_logger(__name__)
 
 
 async def triage_node(state: AgentState) -> dict:
     now = datetime.now(timezone.utc).isoformat()
-    settings = get_settings()
+    tenant_id = state["tenant_id"]
+    ai_config = get_ai_config(tenant_id)
     raw = state["raw_ticket"]
 
     # Load admin-configured categories
     async with get_session() as db:
         result = await db.execute(
             sa_text("SELECT name, team_id FROM category_config WHERE tenant_id = :tid ORDER BY name"),
-            {"tid": state["tenant_id"]},
+            {"tid": tenant_id},
         )
         rows = result.mappings().all()
 
@@ -45,11 +46,7 @@ async def triage_node(state: AgentState) -> dict:
     category_names = [r["name"] for r in rows]
     team_by_category: dict[str, str | None] = {r["name"]: r["team_id"] for r in rows}
 
-    client = AsyncOpenAI(
-        base_url=settings.ollama_base_url,
-        api_key="ollama",
-        timeout=settings.ollama_timeout_seconds,
-    )
+    client = get_llm_client(tenant_id)
 
     system_prompt = (
         "You are an IT support triage assistant. "
@@ -71,7 +68,7 @@ async def triage_node(state: AgentState) -> dict:
     try:
         response = await asyncio.wait_for(
             client.chat.completions.create(
-                model=settings.ollama_model,
+                model=ai_config.llm_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -79,7 +76,7 @@ async def triage_node(state: AgentState) -> dict:
                 max_tokens=64,
                 temperature=0,
             ),
-            timeout=settings.ollama_timeout_seconds,
+            timeout=get_settings().ollama_timeout_seconds,
         )
         raw_text = (response.choices[0].message.content or "{}").strip()
         # Strip markdown code fences if model wraps the JSON

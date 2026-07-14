@@ -39,6 +39,7 @@ from app.models.api_schemas import (
     UserUpdate,
 )
 from app.services import audit_logger, kill_switch, rollback_store
+from app.services.ai_config_service import get_ai_config
 from app.services.notification_bus import notification_bus
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -71,7 +72,10 @@ async def get_config(
             "       last_poll_timestamp, last_sync_timestamp, "
             "       setup_complete, current_wizard_step, "
             "       kill_switch_changed_by, kill_switch_changed_at, "
-            "       company_name, company_logo, accent_color "
+            "       company_name, company_logo, accent_color, "
+            "       jsm_base_url, jsm_project_key, zen_subdomain, "
+            "       embedding_provider, embedding_base_url, embedding_model, embedding_vector_size, "
+            "       llm_base_url, llm_model "
             "FROM platform_config WHERE tenant_id = :tid"
         ),
         {"tid": current_user["tenant_id"]},
@@ -79,6 +83,7 @@ async def get_config(
     row = result.mappings().first()
     if row is None:
         raise HTTPException(status_code=404, detail="Platform config not initialised")
+    ai_config = get_ai_config(current_user["tenant_id"])
     return PlatformConfigResponse(
         aura_enabled=bool(row["aura_enabled"]),
         itsm_provider=row["itsm_provider"],
@@ -98,6 +103,17 @@ async def get_config(
         company_name=row["company_name"],
         company_logo=row["company_logo"],
         accent_color=row["accent_color"],
+        jsm_base_url=row["jsm_base_url"],
+        jsm_project_key=row["jsm_project_key"],
+        zen_subdomain=row["zen_subdomain"],
+        embedding_provider=row["embedding_provider"],
+        embedding_base_url=row["embedding_base_url"],
+        embedding_model=row["embedding_model"],
+        embedding_vector_size=row["embedding_vector_size"],
+        embedding_configured=ai_config.embeddings_configured,
+        llm_base_url=row["llm_base_url"],
+        llm_model=row["llm_model"],
+        llm_configured=ai_config.llm_configured,
     )
 
 

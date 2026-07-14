@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 def _make_state(summary: str, description: str = "", embedding=None) -> dict:
     return {
         "ticket_id": "TEST-200",
+        "tenant_id": "test-tenant-1",
         "raw_ticket": {"summary": summary, "description": description},
         "query_embedding": embedding or [0.1] * 768,
         "audit_steps": [],
@@ -38,7 +39,7 @@ def _make_state(summary: str, description: str = "", embedding=None) -> dict:
 def mock_embedder_node():
     embedder = MagicMock()
     embedder.embed_query_text = AsyncMock(return_value=[0.2] * 768)
-    with patch("app.agents.nodes.priority_scorer_node.GeminiEmbedder", return_value=embedder):
+    with patch("app.agents.nodes.priority_scorer_node.get_embedder", return_value=embedder):
         yield embedder
 
 

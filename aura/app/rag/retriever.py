@@ -33,7 +33,7 @@ from rank_bm25 import BM25Okapi
 from app.core.logging import get_logger
 from app.db.qdrant_client import get_qdrant_client
 from app.models.agent_state import RetrievedChunk
-from app.rag.embedder import GeminiEmbedder
+from app.services.ai_config_service import get_embedder
 
 log = get_logger(__name__)
 
@@ -62,8 +62,8 @@ class _Candidate:
 class HybridRetriever:
     """Stateless retriever — create one instance and reuse across requests."""
 
-    def __init__(self) -> None:
-        self._embedder = GeminiEmbedder()
+    def __init__(self, tenant_id: str) -> None:
+        self._embedder = get_embedder(tenant_id)
 
     async def retrieve(
         self,

@@ -19,9 +19,9 @@ from app.core.security import require_admin
 from app.db.qdrant_client import ensure_tenant_collection
 from app.rag.chunker import DynamicChunker
 from app.rag.document_converter import convert_to_markdown
-from app.rag.embedder import GeminiEmbedder
 from app.rag.ingestion_pipeline import upsert_embedded_chunks
 from app.services import kill_switch
+from app.services.ai_config_service import get_ai_config, get_embedder
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
@@ -56,6 +56,9 @@ async def ingest_document(
     if not kill_switch.is_enabled(tenant_id):
         raise HTTPException(503, "AURA is currently disabled (kill switch active).")
 
+    if not get_ai_config(tenant_id).embeddings_configured:
+        raise HTTPException(409, "Configure an embedding provider before uploading knowledge documents.")
+
     file_bytes = await _read_upload_capped(file, settings.max_upload_size_bytes)
     filename = file.filename or "document"
 
@@ -84,7 +87,7 @@ async def ingest_document(
         raise HTTPException(422, "No content could be extracted from the document.")
 
     # 3. Embed (dense + sparse BM25)
-    embedder = GeminiEmbedder()
+    embedder = get_embedder(tenant_id)
     embedder.fit_bm25([c.content for c in chunks])
     embedded = await embedder.embed_chunks(chunks)
 

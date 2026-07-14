@@ -60,6 +60,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from app.services.itsm_client import init_itsm_credentials
         await init_itsm_credentials(db)
 
+        from app.services.ai_config_service import init_ai_config
+        await init_ai_config(db)
+
     await start_scheduler()
 
     log.info("aura.ready")

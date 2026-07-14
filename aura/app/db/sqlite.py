@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from app.core.config import get_settings
+from app.core.crypto import encrypt
 from app.core.logging import get_logger
 
 log = get_logger(__name__)
@@ -82,6 +83,44 @@ async def _table_has_column(conn, table: str, column: str) -> bool:
 
     info = await conn.execute(sa_text(f"PRAGMA table_info({table})"))
     return column in {row[1] for row in info.all()}
+
+
+async def _backfill_ai_config_from_global_settings() -> None:
+    """One-time backfill, run only the first time the AI-config columns are
+    added to an existing database. Populates every current tenant row with
+    the operator's pre-existing global Settings (the single Gemini key /
+    LLM endpoint every tenant already shares today) so upgrading doesn't
+    break any tenant's live pipeline. Tenants created after this point start
+    with these columns NULL and must configure their own via the wizard —
+    this function must never run again after the initial upgrade.
+    """
+    from sqlalchemy import text as sa_text
+
+    settings = get_settings()
+    encrypted_embedding_key = encrypt(settings.gemini_api_key)
+    async with _get_engine().begin() as conn:
+        await conn.execute(
+            sa_text(
+                """
+                UPDATE platform_config
+                SET embedding_provider = 'gemini',
+                    embedding_api_key_encrypted = :embedding_key,
+                    embedding_model = :embedding_model,
+                    embedding_vector_size = :vector_size,
+                    llm_base_url = :llm_base_url,
+                    llm_model = :llm_model
+                WHERE embedding_provider IS NULL
+                """
+            ),
+            {
+                "embedding_key": encrypted_embedding_key,
+                "embedding_model": settings.gemini_embedding_model,
+                "vector_size": settings.qdrant_vector_size,
+                "llm_base_url": settings.ollama_base_url,
+                "llm_model": settings.ollama_model,
+            },
+        )
+    log.info("database.ai_config_backfilled_from_global_settings")
 
 
 async def _recreate_for_tenancy(
@@ -470,6 +509,35 @@ async def run_migrations() -> None:
         await conn.execute(
             sa_text("CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages (session_id)")
         )
+
+    # ── Per-tenant AI (embedding/LLM) provider config ───────────────────────
+    # No fallback by design: a tenant with these columns NULL gets a clean
+    # pipeline abstention rather than silently borrowing another tenant's or
+    # the operator's key. `_ai_columns_newly_added` distinguishes "upgrading
+    # an existing DB that predates this feature" (needs a one-time backfill
+    # from the old global Settings, below, so already-running tenants don't
+    # suddenly break) from "fresh DB created from the current init_schema.sql"
+    # (no pre-existing tenants to backfill) and from "columns already added on
+    # a prior startup" (must NOT re-backfill — that would erase a tenant's own
+    # configured values, or wrongly un-blank a NULL a newer tenant left
+    # unconfigured on purpose).
+    async with _get_engine().begin() as conn:
+        _ai_columns_newly_added = not await _table_has_column(conn, "platform_config", "embedding_provider")
+        for col, ddl_type in (
+            ("embedding_provider", "TEXT"),
+            ("embedding_api_key_encrypted", "TEXT"),
+            ("embedding_base_url", "TEXT"),
+            ("embedding_model", "TEXT"),
+            ("embedding_vector_size", "INTEGER"),
+            ("llm_base_url", "TEXT"),
+            ("llm_model", "TEXT"),
+            ("llm_api_key_encrypted", "TEXT"),
+        ):
+            if not await _table_has_column(conn, "platform_config", col):
+                await conn.execute(sa_text(f"ALTER TABLE platform_config ADD COLUMN {col} {ddl_type}"))
+
+    if _ai_columns_newly_added:
+        await _backfill_ai_config_from_global_settings()
 
     # ── tenant_id indexes ────────────────────────────────────────────────────
     # Deliberately created here, not in init_schema.sql — every table above

@@ -1,17 +1,25 @@
-"""Embedding layer for AURA hybrid search.
+"""Gemini embedding provider for AURA hybrid search.
 
 Produces two vector types per chunk:
-  - Dense  : Gemini gemini-embedding-2 (768-dim float via output_dimensionality), batched up to 100/call
+  - Dense  : Gemini gemini-embedding-2 (configurable-dim float via
+             output_dimensionality), batched up to 100/call
   - Sparse : BM25 weights via rank-bm25 (variable-width int indices + float values)
 
 The corpus for BM25 must be fitted before encoding individual chunks.
 Call GeminiEmbedder.fit_bm25(all_texts) once per ingestion run, then
 embed_chunks() for each batch.
+
+Each tenant supplies their own Gemini API key (app.services.ai_config_service),
+so `_configure_and_embed` below runs `genai.configure(api_key=...)` with a
+*different* key per tenant against the same process. `google.generativeai`'s
+`configure()` sets a process-wide module global, not a per-instance
+credential — without `_gemini_lock`, two tenants' concurrent embed calls could
+interleave and one could silently embed under the other's key. The lock wraps
+the entire configure-then-embed round trip (including the executor call, not
+just the configure() line) so at most one such round trip is ever in flight.
 """
 
 import asyncio
-import re
-from dataclasses import dataclass, field
 from typing import Sequence
 
 # google-genai 2.10.0 has a Python 3.14 incompatibility (_UnionGenericAlias).
@@ -21,7 +29,6 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore", FutureWarning)
     import google.generativeai as genai
 
-from rank_bm25 import BM25Okapi
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -31,11 +38,16 @@ from tenacity import (
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.models.jsm import DocumentChunk, TicketChunk
+from app.rag.embedder_base import AnyChunk, BM25SparseEncoder, EmbeddedChunk
 
 log = get_logger(__name__)
 
-AnyChunk = TicketChunk | DocumentChunk
+# Serializes every Gemini configure()+embed_content() round trip process-wide
+# — see module docstring. Embedding calls are batched/infrequent (ingestion
+# runs, one query embed per ticket/chat turn), not a request-per-second hot
+# path, so full serialization across tenants is an acceptable trade-off for
+# correctness.
+_gemini_lock = asyncio.Lock()
 
 # Last observed Gemini query-embedding latency, in milliseconds. Updated by
 # every embed_query_text() call (the hot path hit by the agent graph on each
@@ -48,77 +60,45 @@ def get_last_query_latency_ms() -> float | None:
     return _last_query_latency_ms
 
 
-@dataclass
-class EmbeddedChunk:
-    chunk: AnyChunk
-    dense_vector: list[float]
-    sparse_indices: list[int]
-    sparse_values: list[float]
-
-
-@dataclass
-class BM25Corpus:
-    """Fitted BM25 model + token→index vocabulary built from the ingestion corpus."""
-    model: BM25Okapi
-    vocab: dict[str, int]           # token → column index
-    tokenized_docs: list[list[str]] = field(repr=False)
-
-
-def _tokenize(text: str) -> list[str]:
-    """Lowercase, strip punctuation, split on whitespace."""
-    return re.sub(r"[^\w\s]", " ", text.lower()).split()
-
-
 class GeminiEmbedder:
-    def __init__(self) -> None:
-        settings = get_settings()
-        genai.configure(api_key=settings.gemini_api_key)
-        self._model = settings.gemini_embedding_model
-        self._batch_size = settings.gemini_embedding_batch_size
-        self._corpus: BM25Corpus | None = None
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        vector_size: int = 768,
+        batch_size: int | None = None,
+    ) -> None:
+        self._api_key = api_key
+        self._model = model
+        self._vector_size = vector_size
+        self._batch_size = batch_size or get_settings().gemini_embedding_batch_size
+        self._bm25 = BM25SparseEncoder()
 
     # ── BM25 corpus fitting ───────────────────────────────────────────────────
 
     def fit_bm25(self, texts: Sequence[str]) -> None:
-        """Fit the BM25 model on the full corpus of chunk texts.
-
-        Must be called before embed_chunks(). Rebuilds the vocab and the
-        BM25Okapi model from scratch — safe to call multiple times.
-        """
-        tokenized = [_tokenize(t) for t in texts]
-        model = BM25Okapi(tokenized)
-
-        # Build a stable token→index vocabulary from all unique tokens
-        vocab: dict[str, int] = {}
-        for tokens in tokenized:
-            for tok in tokens:
-                if tok not in vocab:
-                    vocab[tok] = len(vocab)
-
-        self._corpus = BM25Corpus(
-            model=model,
-            vocab=vocab,
-            tokenized_docs=tokenized,
-        )
-        log.info(
-            "embedder.bm25_fitted",
-            corpus_size=len(texts),
-            vocab_size=len(vocab),
-        )
-
-    def _sparse_vector(self, text: str) -> tuple[list[int], list[float]]:
-        """Compute BM25 sparse vector for a single text.
-
-        Returns (indices, values) — only non-zero terms are included,
-        matching Qdrant's SparseVector format.
-        """
-        if self._corpus is None:
-            raise RuntimeError("BM25 corpus not fitted — call fit_bm25() first.")
-
-        tokens = _tokenize(text)
-        return _bm25_term_weights(self._corpus, tokens)
+        self._bm25.fit(texts)
+        log.info("embedder.bm25_fitted", corpus_size=len(texts))
 
     # ── Dense embedding (Gemini) ──────────────────────────────────────────────
+
+    def _configure_and_embed_documents(self, texts: list[str]) -> dict:
+        genai.configure(api_key=self._api_key)
+        return genai.embed_content(
+            model=self._model,
+            content=texts,
+            task_type="RETRIEVAL_DOCUMENT",
+            output_dimensionality=self._vector_size,
+        )
+
+    def _configure_and_embed_query(self, text: str) -> dict:
+        genai.configure(api_key=self._api_key)
+        return genai.embed_content(
+            model=self._model,
+            content=text,
+            task_type="RETRIEVAL_QUERY",
+            output_dimensionality=self._vector_size,
+        )
 
     @retry(
         retry=retry_if_exception_type(Exception),
@@ -129,15 +109,8 @@ class GeminiEmbedder:
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Embed a single batch of texts via Gemini API (async via thread pool)."""
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: genai.embed_content(
-                model=self._model,
-                content=texts,
-                task_type="RETRIEVAL_DOCUMENT",
-                output_dimensionality=768,
-            ),
-        )
+        async with _gemini_lock:
+            result = await loop.run_in_executor(None, self._configure_and_embed_documents, texts)
         return result["embedding"]
 
     async def embed_query_text(self, text: str) -> list[float]:
@@ -149,15 +122,8 @@ class GeminiEmbedder:
         global _last_query_latency_ms
         loop = asyncio.get_event_loop()
         t0 = loop.time()
-        result = await loop.run_in_executor(
-            None,
-            lambda: genai.embed_content(
-                model=self._model,
-                content=text,
-                task_type="RETRIEVAL_QUERY",
-                output_dimensionality=768,
-            ),
-        )
+        async with _gemini_lock:
+            result = await loop.run_in_executor(None, self._configure_and_embed_query, text)
         _last_query_latency_ms = round((loop.time() - t0) * 1000, 1)
         return result["embedding"]
 
@@ -183,7 +149,7 @@ class GeminiEmbedder:
 
         fit_bm25() must have been called with the full corpus beforehand.
         """
-        if self._corpus is None:
+        if not self._bm25.fitted:
             raise RuntimeError("BM25 corpus not fitted — call fit_bm25() first.")
 
         texts = [c.content for c in chunks]
@@ -191,7 +157,7 @@ class GeminiEmbedder:
 
         embedded: list[EmbeddedChunk] = []
         for chunk, dense in zip(chunks, dense_vectors):
-            indices, values = self._sparse_vector(chunk.content)
+            indices, values = self._bm25.sparse_vector(chunk.content)
             embedded.append(
                 EmbeddedChunk(
                     chunk=chunk,
@@ -203,48 +169,3 @@ class GeminiEmbedder:
 
         log.info("embedder.chunks_embedded", count=len(embedded))
         return embedded
-
-
-# ── BM25 term-weight helper ───────────────────────────────────────────────────
-
-def _bm25_term_weights(
-    corpus: BM25Corpus,
-    query_tokens: list[str],
-) -> tuple[list[int], list[float]]:
-    """Compute per-term BM25 IDF × average-TF weight for a query document.
-
-    This produces the sparse representation used as the Qdrant SparseVector:
-    only tokens present in the corpus vocabulary get a non-zero weight.
-    """
-    from collections import Counter
-
-    k1 = 1.5
-    b = 0.75
-    bm25 = corpus.model
-
-    tf_counter = Counter(query_tokens)
-    avg_dl = sum(len(d) for d in corpus.tokenized_docs) / max(len(corpus.tokenized_docs), 1)
-    doc_len = len(query_tokens)
-
-    indices: list[int] = []
-    values: list[float] = []
-
-    for tok, col_idx in corpus.vocab.items():
-        tf = tf_counter.get(tok, 0)
-        if tf == 0:
-            continue
-
-        # IDF from the fitted BM25 model's idf array (BM25Okapi stores it)
-        try:
-            idf = bm25.idf.get(tok, 0.0)
-        except AttributeError:
-            # fallback — BM25Okapi stores idf as a dict-like via internal word_map
-            idf = 0.0
-
-        tf_norm = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_len / max(avg_dl, 1)))
-        weight = idf * tf_norm
-        if weight > 0:
-            indices.append(col_idx)
-            values.append(weight)
-
-    return indices, values

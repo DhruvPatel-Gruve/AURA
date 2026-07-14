@@ -21,8 +21,12 @@ from app.core.crypto import encrypt
 from app.core.security import get_current_user, require_admin
 from app.db.sqlite import get_db
 from app.models.api_schemas import (
+    EmbeddingTestRequest,
+    EmbeddingTestResponse,
     JSMTestRequest,
     JSMTestResponse,
+    LLMTestRequest,
+    LLMTestResponse,
     OkResponse,
     SetupStatusResponse,
     WizardProgressResponse,
@@ -193,6 +197,153 @@ async def test_zendesk_connection(
     return ZendeskTestResponse(success=True, ticket_count=ticket_count)
 
 
+@router.post("/test-embedding-connection", response_model=EmbeddingTestResponse)
+async def test_embedding_connection(
+    body: EmbeddingTestRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[dict, Depends(require_admin)],
+) -> EmbeddingTestResponse:
+    """Test an embedding provider — on success, encrypt and persist it
+    immediately to this tenant's platform_config row, mirroring
+    test_jsm_connection/test_zendesk_connection. A real embed call (not just
+    an auth check) is made so a wrong model name or dimension surfaces here,
+    not as an opaque Qdrant error later."""
+    _PROBE_TEXT = "AURA connectivity test"
+
+    if body.provider == "gemini":
+        from app.rag.embedder import _gemini_lock, genai
+
+        model = body.model or "models/gemini-embedding-2"
+
+        def _configure_and_embed() -> dict:
+            genai.configure(api_key=body.api_key)
+            return genai.embed_content(
+                model=model, content=_PROBE_TEXT,
+                task_type="RETRIEVAL_QUERY", output_dimensionality=768,
+            )
+
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            async with _gemini_lock:
+                result = await loop.run_in_executor(None, _configure_and_embed)
+            vector_size = len(result["embedding"])
+        except Exception as exc:
+            return EmbeddingTestResponse(success=False, error=str(exc))
+
+        db_base_url, db_model, db_vector_size = None, model, 768
+
+    else:
+        if not (body.base_url and body.model and body.vector_size):
+            return EmbeddingTestResponse(
+                success=False,
+                error="base_url, model, and vector_size are all required for an OpenAI-compatible embedding provider.",
+            )
+        from app.core.url_safety import UnsafeURLError, assert_safe_ai_endpoint_url
+        try:
+            await assert_safe_ai_endpoint_url(body.base_url)
+        except UnsafeURLError as exc:
+            return EmbeddingTestResponse(success=False, error=str(exc))
+
+        from openai import AsyncOpenAI
+        try:
+            client = AsyncOpenAI(base_url=body.base_url, api_key=body.api_key)
+            response = await client.embeddings.create(model=body.model, input=[_PROBE_TEXT])
+            vector_size = len(response.data[0].embedding)
+        except Exception as exc:
+            return EmbeddingTestResponse(success=False, error=str(exc))
+
+        if vector_size != body.vector_size:
+            return EmbeddingTestResponse(
+                success=False,
+                error=f"Model returned {vector_size}-dim vectors, but you specified {body.vector_size}.",
+            )
+
+        db_base_url, db_model, db_vector_size = body.base_url, body.model, body.vector_size
+
+    tenant_id = current_user["tenant_id"]
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        sa_text(
+            "UPDATE platform_config SET embedding_provider = :provider, "
+            "embedding_api_key_encrypted = :key, embedding_base_url = :base_url, "
+            "embedding_model = :model, embedding_vector_size = :vsize, updated_at = :now "
+            "WHERE tenant_id = :tid"
+        ),
+        {
+            "provider": body.provider,
+            "key": encrypt(body.api_key),
+            "base_url": db_base_url,
+            "model": db_model,
+            "vsize": db_vector_size,
+            "now": now,
+            "tid": tenant_id,
+        },
+    )
+    await db.commit()
+
+    from app.services.ai_config_service import refresh_tenant_ai_config
+    await refresh_tenant_ai_config(db, tenant_id)
+
+    return EmbeddingTestResponse(success=True, vector_size=vector_size)
+
+
+@router.post("/test-llm-connection", response_model=LLMTestResponse)
+async def test_llm_connection(
+    body: LLMTestRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[dict, Depends(require_admin)],
+) -> LLMTestResponse:
+    """Test an OpenAI-compatible LLM endpoint — on success, encrypt and
+    persist it immediately to this tenant's platform_config row. A real tiny
+    chat completion is made (not just a health check) so an invalid model
+    name or unreachable server surfaces here."""
+    from app.core.url_safety import UnsafeURLError, assert_safe_ai_endpoint_url
+
+    url = body.base_url.rstrip("/")
+    try:
+        await assert_safe_ai_endpoint_url(url)
+    except UnsafeURLError as exc:
+        return LLMTestResponse(success=False, error=str(exc))
+
+    from openai import AsyncOpenAI
+    try:
+        client = AsyncOpenAI(base_url=url, api_key=body.api_key or "unused")
+        response = await client.chat.completions.create(
+            model=body.model,
+            messages=[
+                {"role": "system", "content": "Reply with the single word: ready."},
+                {"role": "user", "content": "ping"},
+            ],
+            max_tokens=5,
+        )
+        sample_reply = (response.choices[0].message.content or "").strip()
+    except Exception as exc:
+        return LLMTestResponse(success=False, error=str(exc))
+
+    tenant_id = current_user["tenant_id"]
+    now = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        sa_text(
+            "UPDATE platform_config SET llm_base_url = :base_url, llm_model = :model, "
+            "llm_api_key_encrypted = :key, updated_at = :now WHERE tenant_id = :tid"
+        ),
+        {
+            "base_url": url,
+            "model": body.model,
+            "key": encrypt(body.api_key),
+            "now": now,
+            "tid": tenant_id,
+        },
+    )
+    await db.commit()
+
+    from app.services.ai_config_service import refresh_tenant_ai_config
+    await refresh_tenant_ai_config(db, tenant_id)
+
+    return LLMTestResponse(success=True, sample_reply=sample_reply)
+
+
 @router.post("/wizard/save", response_model=OkResponse)
 async def save_wizard_step(
     body: WizardStepSave,
@@ -293,8 +444,8 @@ async def complete_setup(
             except Exception:
                 pass  # columns not yet migrated — branding can be set post-launch
 
-    # Step 5 → category_config (INSERT OR IGNORE to stay idempotent)
-    step3 = steps.get(5, {})
+    # Step 6 → category_config (INSERT OR IGNORE to stay idempotent)
+    step3 = steps.get(6, {})
     for cat in step3.get("categories", []):
         name = str(cat.get("name", "")).strip()
         if not name:
@@ -316,8 +467,8 @@ async def complete_setup(
             },
         )
 
-    # Step 6 → users (INSERT OR IGNORE to stay idempotent)
-    step4 = steps.get(6, {})
+    # Step 7 → users (INSERT OR IGNORE to stay idempotent)
+    step4 = steps.get(7, {})
     for user in step4.get("users", []):
         email = str(user.get("email", "")).strip().lower()
         if not email:
@@ -339,8 +490,8 @@ async def complete_setup(
             },
         )
 
-    # Step 7 → platform_config thresholds
-    step5 = steps.get(7, {})
+    # Step 8 → platform_config thresholds
+    step5 = steps.get(8, {})
     if step5:
         fields: list[str] = []
         params: dict = {"now": now}

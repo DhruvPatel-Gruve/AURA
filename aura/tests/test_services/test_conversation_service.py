@@ -10,8 +10,22 @@ from sqlalchemy import text as sa_text
 
 from app.models.jsm import JSMComment, JSMTicket
 from app.services import conversation_service
+from app.services.ai_config_service import ResolvedAIConfig
 
 TENANT = "test-tenant-1"
+
+_CONFIGURED_AI = ResolvedAIConfig(
+    tenant_id=TENANT,
+    embedding_provider="gemini", embedding_api_key="k", embedding_base_url=None,
+    embedding_model="models/gemini-embedding-2", embedding_vector_size=768,
+    llm_base_url="http://localhost:11434/v1", llm_model="qwen3:8b", llm_api_key=None,
+)
+_UNCONFIGURED_AI = ResolvedAIConfig(
+    tenant_id=TENANT,
+    embedding_provider=None, embedding_api_key=None, embedding_base_url=None,
+    embedding_model=None, embedding_vector_size=None,
+    llm_base_url=None, llm_model=None, llm_api_key=None,
+)
 
 
 def _now():
@@ -148,12 +162,25 @@ async def test_check_for_replies_triggers_turn_on_new_reply(db_session):
     turn_mock = AsyncMock()
     with patch("app.services.itsm_client.get_itsm_client", return_value=mock_jsm), \
          patch("app.services.conversation_service._run_conversation_turn", turn_mock), \
+         patch("app.services.conversation_service.get_ai_config", return_value=_CONFIGURED_AI), \
          patch("app.services.kill_switch.is_enabled", return_value=True):
         await conversation_service.check_for_replies(db_session, TENANT)
 
     turn_mock.assert_called_once()
     assert turn_mock.call_args.args[2].ticket_id == "KAN-1"
     assert turn_mock.call_args.args[3] is reply
+
+
+@pytest.mark.asyncio
+async def test_check_for_replies_stops_when_ai_not_configured(db_session):
+    await _insert_conversation(db_session, "KAN-1", reporter_account_id="reporter-1")
+
+    with patch("app.services.kill_switch.is_enabled", return_value=True), \
+         patch("app.services.conversation_service.get_ai_config", return_value=_UNCONFIGURED_AI), \
+         patch("app.services.itsm_client.get_itsm_client") as mock_cls:
+        await conversation_service.check_for_replies(db_session, TENANT)
+
+    mock_cls.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -169,6 +196,7 @@ async def test_check_for_replies_noop_when_no_new_comment(db_session):
     turn_mock = AsyncMock()
     with patch("app.services.itsm_client.get_itsm_client", return_value=mock_jsm), \
          patch("app.services.conversation_service._run_conversation_turn", turn_mock), \
+         patch("app.services.conversation_service.get_ai_config", return_value=_CONFIGURED_AI), \
          patch("app.services.kill_switch.is_enabled", return_value=True):
         await conversation_service.check_for_replies(db_session, TENANT)
 
@@ -216,25 +244,21 @@ async def test_check_idle_timeouts_ignores_recent_conversation(db_session):
 
 @pytest.mark.asyncio
 async def test_classify_confirmation_parses_true():
-    settings = type("S", (), {"ollama_base_url": "http://x", "ollama_model": "m", "ollama_timeout_seconds": 45.0})()
     mock_response = AsyncMock()
     mock_response.choices = [type("C", (), {"message": type("M", (), {"content": '{"confirmed": true}'})()})()]
 
-    with patch("app.services.conversation_service.AsyncOpenAI") as mock_cls:
-        mock_client = AsyncMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
-        mock_cls.return_value = mock_client
-        result = await conversation_service._classify_confirmation("thanks, fixed!", settings)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    with patch("app.services.conversation_service.get_llm_client", return_value=mock_client):
+        result = await conversation_service._classify_confirmation("thanks, fixed!", TENANT, _CONFIGURED_AI)
 
     assert result is True
 
 
 @pytest.mark.asyncio
 async def test_classify_confirmation_defaults_false_on_error():
-    settings = type("S", (), {"ollama_base_url": "http://x", "ollama_model": "m", "ollama_timeout_seconds": 45.0})()
-
-    with patch("app.services.conversation_service.AsyncOpenAI", side_effect=Exception("down")):
-        result = await conversation_service._classify_confirmation("still broken", settings)
+    with patch("app.services.conversation_service.get_llm_client", side_effect=Exception("down")):
+        result = await conversation_service._classify_confirmation("still broken", TENANT, _CONFIGURED_AI)
 
     assert result is False
 
@@ -251,11 +275,35 @@ async def test_run_conversation_turn_closes_on_confirmation(db_session):
     reply = _make_comment("reporter-1", "thanks, that worked!")
 
     close_mock = AsyncMock()
-    with patch("app.services.conversation_service._classify_confirmation", new=AsyncMock(return_value=True)), \
+    with patch("app.services.conversation_service.get_ai_config", return_value=_CONFIGURED_AI), \
+         patch("app.services.conversation_service._classify_confirmation", new=AsyncMock(return_value=True)), \
          patch("app.services.conversation_service._close_conversation", close_mock):
         await conversation_service._run_conversation_turn(db_session, TENANT, ticket, reply, "reporter-1")
 
     close_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_conversation_turn_skips_when_ai_not_configured(db_session):
+    await _insert_conversation(db_session, "KAN-1")
+    ticket = _make_ticket()
+    reply = _make_comment("reporter-1", "thanks, that worked!")
+
+    close_mock = AsyncMock()
+    classify_mock = AsyncMock()
+    with patch("app.services.conversation_service.get_ai_config", return_value=_UNCONFIGURED_AI), \
+         patch("app.services.conversation_service._classify_confirmation", classify_mock), \
+         patch("app.services.conversation_service._close_conversation", close_mock):
+        await conversation_service._run_conversation_turn(db_session, TENANT, ticket, reply, "reporter-1")
+
+    classify_mock.assert_not_called()
+    close_mock.assert_not_called()
+
+    row = (await db_session.execute(
+        sa_text("SELECT status FROM ticket_conversations WHERE tenant_id = :tid AND ticket_id = 'KAN-1'"),
+        {"tid": TENANT},
+    )).first()
+    assert row[0] == "active"
 
 
 @pytest.mark.asyncio
@@ -270,8 +318,10 @@ async def test_run_conversation_turn_generates_reply_when_not_confirmed(db_sessi
     fake_chunks = [{"ticket_id": "OLD-1", "chunk_type": "resolution", "content": "do X"}]
     gate_result = {"action_taken": "comment_posted", "confidence": 0.95, "threshold": 0.9}
 
-    with patch("app.services.conversation_service._classify_confirmation", new=AsyncMock(return_value=False)), \
+    with patch("app.services.conversation_service.get_ai_config", return_value=_CONFIGURED_AI), \
+         patch("app.services.conversation_service._classify_confirmation", new=AsyncMock(return_value=False)), \
          patch("app.services.conversation_service.ensure_tenant_collection", new=AsyncMock(return_value="resolved_tickets__test")), \
+         patch("app.rag.retriever.get_embedder", return_value=AsyncMock()), \
          patch.object(conversation_service.HybridRetriever, "retrieve", new=AsyncMock(return_value=fake_chunks)), \
          patch("app.services.conversation_service._generate_reply", new=AsyncMock(return_value=("**AURA** reply", 0.95, ["OLD-1"]))), \
          patch("app.services.conversation_service.apply_confidence_gate", new=AsyncMock(return_value=gate_result)) as gate_mock:

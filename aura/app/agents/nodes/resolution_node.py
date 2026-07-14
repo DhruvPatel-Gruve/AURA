@@ -10,13 +10,12 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
-from openai import AsyncOpenAI
-
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.qdrant_client import ensure_tenant_collection
 from app.models.agent_state import AgentState
 from app.rag.retriever import HybridRetriever
+from app.services.ai_config_service import get_ai_config, get_llm_client
 
 log = get_logger(__name__)
 
@@ -27,13 +26,14 @@ _MAX_CONTEXT_CHARS = 4000
 
 async def resolution_node(state: AgentState) -> dict:
     now = datetime.now(timezone.utc).isoformat()
-    settings = get_settings()
+    tenant_id = state["tenant_id"]
+    ai_config = get_ai_config(tenant_id)
     raw = state["raw_ticket"]
     query_text = (raw.get("summary") or "") + "\n" + (raw.get("description") or "")
 
     # ── Stage 1: Hybrid retrieval ─────────────────────────────────────────────
-    collection = await ensure_tenant_collection(state["tenant_id"])
-    retriever = HybridRetriever()
+    collection = await ensure_tenant_collection(tenant_id)
+    retriever = HybridRetriever(tenant_id)
     chunks = await retriever.retrieve(
         query_text=query_text,
         top_k=_TOP_K,
@@ -70,11 +70,7 @@ async def resolution_node(state: AgentState) -> dict:
     valid_ticket_ids = {c["ticket_id"] for c in chunks}
 
     # ── Stage 3: LLM call ─────────────────────────────────────────────────────
-    client = AsyncOpenAI(
-        base_url=settings.ollama_base_url,
-        api_key="ollama",
-        timeout=settings.ollama_timeout_seconds,
-    )
+    client = get_llm_client(tenant_id)
 
     system_prompt = (
         "You are an IT support assistant. "
@@ -107,7 +103,7 @@ async def resolution_node(state: AgentState) -> dict:
     try:
         response = await asyncio.wait_for(
             client.chat.completions.create(
-                model=settings.ollama_model,
+                model=ai_config.llm_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -115,7 +111,7 @@ async def resolution_node(state: AgentState) -> dict:
                 max_tokens=1024,
                 temperature=0.2,
             ),
-            timeout=settings.ollama_timeout_seconds,
+            timeout=get_settings().ollama_timeout_seconds,
         )
         llm_raw = (response.choices[0].message.content or "{}").strip()
         # Strip markdown code fences

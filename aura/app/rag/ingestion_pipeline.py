@@ -25,7 +25,8 @@ from app.core.logging import get_logger
 from app.db.qdrant_client import SPARSE_VECTOR_NAME, ensure_tenant_collection, get_qdrant_client
 from app.models.jsm import IngestionRunSummary, JSMTicket, TicketChunk
 from app.rag.chunker import DynamicChunker
-from app.rag.embedder import EmbeddedChunk, GeminiEmbedder
+from app.rag.embedder_base import Embedder, EmbeddedChunk
+from app.services.ai_config_service import get_ai_config, get_embedder
 from app.services.itsm_client import get_itsm_client
 
 log = get_logger(__name__)
@@ -54,7 +55,7 @@ class IngestionPipeline:
         self._db = db
         self._tenant_id = tenant_id
         self._chunker = DynamicChunker()
-        self._embedder = GeminiEmbedder()
+        self._embedder: Embedder | None = None  # resolved lazily in run(), after the AI-config gate check
         self._settings = get_settings()
         self._collection: str | None = None  # resolved lazily in run(), needs an await
         self._project_key: str | None = None  # this tenant's jsm_project_key, loaded in run()
@@ -91,6 +92,19 @@ class IngestionPipeline:
         try:
             yield _emit("started", 0)
 
+            if not get_ai_config(self._tenant_id).embeddings_configured:
+                # Clean early return, not a raised exception — distinct from
+                # the crash-path except Exception below. No fallback key:
+                # this tenant must complete the Model & AI Configuration step.
+                summary.error_message = (
+                    "Embedding provider not configured for this tenant — complete or edit "
+                    "the Model & AI Configuration step before running ingestion."
+                )
+                await self._finalise(summary, status="failed")
+                yield _emit("failed", 0, summary.error_message)
+                return
+
+            self._embedder = get_embedder(self._tenant_id)
             self._collection = await ensure_tenant_collection(self._tenant_id)
             self._project_key = await self._load_project_key()
 

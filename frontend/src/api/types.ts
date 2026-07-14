@@ -73,6 +73,32 @@ export interface ZendeskTestResponse {
   error?:       string
 }
 
+export interface EmbeddingTestRequest {
+  provider:    'gemini' | 'openai_compatible'
+  api_key:     string
+  base_url?:   string
+  model?:      string
+  vector_size?: number
+}
+
+export interface EmbeddingTestResponse {
+  success:     boolean
+  vector_size: number
+  error:       string | null
+}
+
+export interface LLMTestRequest {
+  base_url: string
+  model:    string
+  api_key?: string
+}
+
+export interface LLMTestResponse {
+  success:      boolean
+  sample_reply: string | null
+  error:        string | null
+}
+
 export interface WizardStepSave {
   step: number
   data: Record<string, unknown>
@@ -81,6 +107,7 @@ export interface WizardStepSave {
 // ── Platform Config ───────────────────────────────────────────────────────────
 export interface PlatformConfig {
   aura_enabled:               boolean
+  itsm_provider:              string
   confidence_threshold:        number
   abstention_threshold:        number
   conversation_idle_timeout_hours: number
@@ -94,7 +121,20 @@ export interface PlatformConfig {
   current_wizard_step:         number
   kill_switch_changed_by:      string | null
   kill_switch_changed_at:      string | null
+  company_name:                string | null
+  company_logo:                string | null
   accent_color:                string | null   // hex, e.g. "#6366f1"
+  jsm_base_url:                string | null
+  jsm_project_key:             string | null
+  zen_subdomain:               string | null
+  embedding_provider:          'gemini' | 'openai_compatible' | null
+  embedding_base_url:          string | null
+  embedding_model:             string | null
+  embedding_vector_size:       number | null
+  embedding_configured:        boolean
+  llm_base_url:                string | null
+  llm_model:                   string | null
+  llm_configured:              boolean
 }
 
 // ── Category Config ───────────────────────────────────────────────────────────

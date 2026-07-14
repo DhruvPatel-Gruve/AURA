@@ -14,7 +14,7 @@ from statistics import StatisticsError, mode
 from app.core.logging import get_logger
 from app.db.qdrant_client import ensure_tenant_collection, get_qdrant_client
 from app.models.agent_state import AgentState
-from app.rag.embedder import GeminiEmbedder
+from app.services.ai_config_service import get_embedder
 
 log = get_logger(__name__)
 
@@ -63,7 +63,7 @@ async def priority_scorer_node(state: AgentState) -> dict:
             break
 
     # Always embed query — other nodes depend on state.query_embedding
-    embedder = GeminiEmbedder()
+    embedder = get_embedder(state["tenant_id"])
     query_embedding = state.get("query_embedding") or await embedder.embed_query_text(text[:2000])
 
     if priority:

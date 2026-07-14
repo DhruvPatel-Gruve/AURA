@@ -5,7 +5,7 @@ Entry point: compiled_graph
   compiled_graph.astream(state)  → async generator of (node_name, partial_state)
 
 Graph topology:
-  kill_switch → priority_scorer → triage → assignment →
+  kill_switch → ai_config_gate → priority_scorer → triage → assignment →
   collision → autonomy → sla → abstention → resolution → confidence_gate → audit_finalizer
 
 Conditional edges halt to audit_finalizer when pipeline_halted=True.
@@ -15,6 +15,7 @@ from langgraph.graph import END, StateGraph
 
 from app.models.agent_state import AgentState
 from app.agents.nodes.kill_switch_node import kill_switch_node
+from app.agents.nodes.ai_config_gate_node import ai_config_gate_node
 from app.agents.nodes.priority_scorer_node import priority_scorer_node
 from app.agents.nodes.triage_node import triage_node
 from app.agents.nodes.assignment_node import assignment_node
@@ -38,6 +39,7 @@ def _route_on_halt(state: AgentState) -> str:
 _builder = StateGraph(AgentState)
 
 _builder.add_node("kill_switch_node", kill_switch_node)
+_builder.add_node("ai_config_gate_node", ai_config_gate_node)
 _builder.add_node("priority_scorer_node", priority_scorer_node)
 _builder.add_node("triage_node", triage_node)
 _builder.add_node("assignment_node", assignment_node)
@@ -55,6 +57,11 @@ _HALT_TARGET = "audit_finalizer_node"
 
 _builder.add_conditional_edges(
     "kill_switch_node",
+    _route_on_halt,
+    {"halt": _HALT_TARGET, "continue": "ai_config_gate_node"},
+)
+_builder.add_conditional_edges(
+    "ai_config_gate_node",
     _route_on_halt,
     {"halt": _HALT_TARGET, "continue": "priority_scorer_node"},
 )
