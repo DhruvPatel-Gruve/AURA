@@ -132,7 +132,7 @@ kill_switch → priority_scorer → triage → assignment → collision → auto
 
 ## Knowledge base / RAG pipeline
 
-1. **Ingestion** (`app/rag/ingestion_pipeline.py`, triggered manually or every N hours by the scheduler): fetches resolved tickets since the last cursor, skips ones already indexed, chunks each into up to 3 pieces (`title_desc`, windowed `comments`, `resolution`), fits a BM25 model over the batch, embeds everything with Gemini, and upserts dual (dense + sparse) vectors into Qdrant with deterministic UUID5 point IDs (so re-running is idempotent).
+1. **Ingestion** (`app/rag/ingestion_pipeline.py`, triggered manually or every N hours by the scheduler): fetches resolved tickets since the last cursor, skips ones already indexed, chunks each into up to 3 pieces (`title_desc`, windowed `comments`, `resolution`), fits a BM25 model over the batch, embeds everything with the tenant's configured embedding provider (Gemini or any OpenAI-compatible endpoint), and upserts dual (dense + sparse) vectors into Qdrant with deterministic UUID5 point IDs (so re-running is idempotent).
 2. Document upload (PDF/DOCX/etc.) follows the same chunk → embed → upsert path via `markitdown` conversion to Markdown first.
 3. **Retrieval** (`app/rag/retriever.py`): dense search against Qdrant's `resolved_tickets` collection, then a BM25 rerank over the candidate set, fused via Reciprocal Rank Fusion.
 4. Every ticket's query embedding is computed once (in `priority_scorer`) and reused by `abstention` and `resolution` to avoid redundant embedding API calls.
@@ -168,7 +168,7 @@ SQLite, 18 tables, no ORM (all access is raw parameterized SQL via SQLAlchemy's 
 |---|---|
 | `tenants` | One row per client organization — name, status (active/suspended), ITSM provider |
 | `users` / `sessions` | Accounts (including the platform-wide `master_admin`, `tenant_id = NULL`) and refresh-token sessions |
-| `platform_config` | One row per tenant: thresholds, kill switch, ITSM provider + encrypted credentials, branding, polling intervals, setup-wizard state |
+| `platform_config` | One row per tenant: thresholds, kill switch, ITSM provider + encrypted credentials, AI provider config (encrypted embedding/LLM keys), branding, polling intervals, setup-wizard state |
 | `wizard_progress` | Setup wizard step state |
 | `category_config` | Category → team mapping, per-category auto-post toggle and SLA minutes |
 | `audit_log` | Append-only decision log — one row per pipeline run; backs every analytics dashboard |
@@ -208,7 +208,7 @@ Every route is protected by one of five auth dependencies (`require_any_auth`, `
 Role-based single-page app, five distinct experiences behind one login:
 
 - **Master Admin** — Tenants: create a client organization + its first admin account, rename, suspend/reactivate, reset a locked-out admin's password. Nothing else — no ticket/audit data of any tenant is ever visible here.
-- **Admin** — Dashboard, Users, Categories, Agent Config (thresholds), Kill Switch, Rollback History, Audit Log, Knowledge Index (Qdrant stats/rebuild), System Health, and the 9-step Setup Wizard.
+- **Admin** — Dashboard, Users, Categories, Agent Config (thresholds), Integrations (edit the ITSM connection and AI provider config after setup), Kill Switch, Rollback History, Audit Log, Knowledge Index (Qdrant stats/rebuild), System Health, and the 10-step Setup Wizard.
 - **Manager** — Dashboard, SLA Compliance, Resolution Analytics, Confidence Analytics, Team Performance, Abstention Report, Collision Log, Approval Queue.
 - **Technician** — Dashboard, unified Ticket Queue (acknowledge, view live comment thread, approve/edit/reject AURA's draft, roll back and correct a posted comment).
 - **End User** — Dashboard, My Tickets, Submit Ticket, Live Chat.
@@ -219,9 +219,9 @@ State management is deliberately split: **React Query** owns all server data (ti
 
 AURA is multi-tenant — **you do not need a Jira/Zendesk account, or any ITSM
 credentials at all, to boot the app.** Only two things are required up front:
-a Python/Node toolchain, and a Google Gemini API key (used solely for
-embeddings). ITSM credentials are entered later, per tenant, through the
-Setup Wizard — see [step 5](#running-the-app) below.
+a Python/Node toolchain, and a Google Gemini API key. ITSM credentials *and*
+each tenant's own AI providers (embedding + LLM) are entered later, per
+tenant, through the Setup Wizard — see [step 5](#running-the-app) below.
 
 **Default master admin login (for testing):** `admin@aura.local` /
 `changeme123` — seeded automatically on first boot, overridable via
@@ -233,8 +233,8 @@ first login; a startup guard blocks this default when `APP_ENV=production`.
 - Python 3.12+ and pip
 - Node.js 18+ and npm
 - Docker (for Qdrant) — or a Qdrant instance reachable at the URL you configure
-- A [Google AI Studio (Gemini) API key](https://aistudio.google.com/apikey) — required to boot
-- An OpenAI-compatible LLM endpoint (local [Ollama](https://ollama.com) running `qwen3:8b`, or a remote vLLM/OpenAI-compatible server) — only needed once a tenant actually processes a ticket, not to start the app or create tenants
+- A [Google AI Studio (Gemini) API key](https://aistudio.google.com/apikey) — required to boot (Settings validation); at runtime each tenant brings their own key via the wizard's AI Configuration step
+- An OpenAI-compatible LLM endpoint (local [Ollama](https://ollama.com), or a remote vLLM/OpenAI-compatible server) — needed to pass the wizard's AI Configuration step and for ticket processing; not needed to start the app or create tenants
 - A Jira Service Management **or** Zendesk account with API credentials — only needed by an individual tenant's admin, entered via their own Setup Wizard; not needed to boot the app or provision tenants
 
 ### Backend setup
@@ -300,15 +300,17 @@ Key variables from `aura/.env.example` — see that file for the full annotated 
 ```
 APP_SECRET_KEY                          # required — 32+ char random string; also derives the
                                          # key used to encrypt every tenant's ITSM API tokens at rest
-GEMINI_API_KEY                          # required — embeddings only, not resolution generation
+GEMINI_API_KEY                          # required to boot; used to backfill pre-existing tenants'
+                                         # AI config on upgrade — new tenants bring their own key
 DEFAULT_ADMIN_EMAIL / DEFAULT_ADMIN_PASSWORD  # bootstrap master_admin login (change after first use)
 QDRANT_URL                              # http://localhost:6333
-OLLAMA_BASE_URL / OLLAMA_MODEL          # OpenAI-compatible LLM endpoint (name kept for historical reasons)
+OLLAMA_BASE_URL / OLLAMA_MODEL          # LLM endpoint used for the same upgrade backfill —
+                                         # new tenants configure theirs in the wizard
 INGESTION_SYNC_INTERVAL_HOURS           # default 6
 CORS_ORIGINS                            # add your frontend's origin if not on the default port
 ```
 
-There is deliberately no `ITSM_PROVIDER`/`JSM_*`/`ZEN_*` here — those are entirely per-tenant now, entered through each tenant's own Setup Wizard and stored encrypted in `platform_config`, never in a process env var.
+There is deliberately no `ITSM_PROVIDER`/`JSM_*`/`ZEN_*` here — those are entirely per-tenant now, entered through each tenant's own Setup Wizard and stored encrypted in `platform_config`, never in a process env var. The same is true of AI providers: each tenant configures its own embedding provider (Gemini or any OpenAI-compatible endpoint) and LLM endpoint in the wizard's **Model & AI Configuration** step, stored encrypted per tenant with **no shared fallback** — a tenant that hasn't configured AI has its ticket pipeline abstain cleanly rather than borrow another tenant's key. Both the ITSM connection and AI config are editable after launch from **Admin → Integrations**.
 
 Runtime thresholds (confidence, abstention, polling interval, SLA per category) are **not** env-only either — they're stored in `platform_config`/`category_config` per tenant and adjustable live from that tenant's Admin UI without a restart.
 
@@ -319,7 +321,7 @@ Runtime thresholds (confidence, abstention, polling interval, SLA per category) 
 3. `npm run dev` (from `frontend/`) — starts the SPA.
 4. Log in with the seeded `master_admin` account: `admin@aura.local` / `changeme123` (overridable via `DEFAULT_ADMIN_EMAIL` / `DEFAULT_ADMIN_PASSWORD`). Change it immediately via the account menu (bottom-left of the sidebar) — a startup guard actively blocks this insecure default when `APP_ENV=production`.
 5. As `master_admin`, go to **Tenants** and create your first tenant (organization name, admin email, admin display name) — this hands back a one-time temporary password for that tenant's admin. No ITSM provider choice happens here.
-6. Log in as that tenant admin and complete the Setup Wizard: pick Jira or Zendesk and enter its real credentials (persisted encrypted immediately once the connection test succeeds), branding, categories, teams, agent thresholds, then trigger an initial knowledge ingestion.
+6. Log in as that tenant admin and complete the Setup Wizard: pick Jira or Zendesk and enter its real credentials (persisted encrypted immediately once the connection test succeeds), branding, **AI configuration** (your Gemini or OpenAI-compatible embedding key + an OpenAI-compatible LLM endpoint — both connection-tested live before you can proceed), categories, teams, agent thresholds, then trigger an initial knowledge ingestion.
 7. Either let the scheduler poll that tenant's live ITSM queue, or submit test tickets through the End User "Submit Ticket" page.
 
 Repeat steps 5–7 for as many tenants as you want — each is fully isolated (own users, own knowledge base collection, own ITSM connection).
@@ -348,8 +350,8 @@ Documented here deliberately, since this is a POC under active iteration:
 - **Acknowledge-before-post is enforced.** A technician cannot approve, edit-and-post, or roll back/re-post a comment until they've acknowledged the ticket — this is checked server-side, not just hidden in the UI, and applies uniformly whether the comment came from the queue or from AURA's auto-post path.
 - **Auto-posted comments aren't duplicated in AURA's own database.** The comment thread shown in the UI is a best-effort live fetch from Jira/Zendesk on every ticket-detail view, not a local cache — so it's always accurate but adds one external API call per view.
 - **Single-process assumptions.** The kill switch cache, the WebSocket connection registry, and the assignment race-lock are all in-process (`asyncio.Lock` / plain dict). Fine for a single backend instance; would need rework to run multiple API workers behind a load balancer.
-- **Two separate LLM backends.** Gemini is used only for embeddings; all text generation (triage classification, resolution drafting) goes through a separate Qwen3-8B endpoint. Don't assume one provider covers both.
-- **Setup Wizard credentials are cosmetic today.** ITSM connection testing in the wizard doesn't actually wire up the credentials used at runtime — those still come from environment variables.
+- **Embeddings and generation are separate, per-tenant providers.** Each tenant configures its own embedding provider (Gemini or any OpenAI-compatible embeddings endpoint) and its own OpenAI-compatible LLM endpoint for text generation — don't assume one provider covers both, or that any two tenants share one.
+- **Changing a tenant's embedding provider/dimension requires a knowledge-base rebuild.** Qdrant collections have a fixed vector dimension; the Admin → Integrations page warns and links the existing rebuild action when an edit changes it.
 
 ---
 
